@@ -48,5 +48,6 @@ temp/
 Thumbs.db
 desktop.ini
 
-# ---- 设计文档（不入库）----
+# ---- 设计文档与 Agent 约定（不入库）----
 version_design/
+AGENTS.md
