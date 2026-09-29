@@ -10,6 +10,7 @@ from app.models.message import Message
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.schemas.conversation import ConversationCreate
+from app.services.cache_service import CacheService
 
 
 class ConversationService:
@@ -17,6 +18,7 @@ class ConversationService:
         self.db = db
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)
+        self.cache = CacheService()
 
     async def create(self, user_id: int, payload: ConversationCreate) -> Conversation:
         conversation = await self.conversations.create(
@@ -33,9 +35,22 @@ class ConversationService:
         )
 
     async def get(self, conversation_id: int, user_id: int) -> Conversation:
+        """获取数据库中的会话（供需要变更的场景使用）。"""
         conversation = await self.conversations.get_for_user(conversation_id, user_id)
         if conversation is None:
             raise ConversationNotFoundError()
+        return conversation
+
+    async def get_detail(self, conversation_id: int, user_id: int) -> Conversation:
+        """读取会话详情，优先使用缓存。"""
+        cached = await self.cache.get_conversation(conversation_id)
+        if cached is not None:
+            if cached.user_id != user_id:
+                raise ConversationNotFoundError()
+            return cached
+
+        conversation = await self.get(conversation_id, user_id)
+        await self.cache.set_conversation(conversation)
         return conversation
 
     async def update_title(
@@ -44,12 +59,15 @@ class ConversationService:
         conversation = await self.get(conversation_id, user_id)
         conversation = await self.conversations.update_title(conversation, title)
         await self.db.commit()
+        await self.cache.invalidate_conversation(conversation_id)
         return conversation
 
     async def delete(self, conversation_id: int, user_id: int) -> None:
         conversation = await self.get(conversation_id, user_id)
         await self.conversations.delete(conversation)
         await self.db.commit()
+        await self.cache.invalidate_conversation(conversation_id)
+        await self.cache.clear_session(conversation_id)
 
     async def list_messages(
         self,

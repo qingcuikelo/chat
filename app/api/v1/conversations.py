@@ -48,7 +48,7 @@ async def get_conversation(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await ConversationService(db).get(conversation_id, current_user.id)
+    return await ConversationService(db).get_detail(conversation_id, current_user.id)
 
 
 @router.patch("/{conversation_id}", response_model=ConversationRead)

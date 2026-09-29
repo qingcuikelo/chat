@@ -35,6 +35,19 @@ class MessageRepository:
         )
         return list(result.scalars().all()), int(total or 0)
 
+    async def list_recent(self, conversation_id: int, limit: int) -> list[Message]:
+        """按时间正序返回最近 limit 条消息。"""
+        result = await self.db.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.id.desc())
+            .limit(limit)
+        )
+        return list(reversed(result.scalars().all()))
+
+    async def get(self, message_id: int) -> Message | None:
+        return await self.db.get(Message, message_id)
+
     async def create(
         self,
         *,
@@ -55,6 +68,10 @@ class MessageRepository:
         await self.db.flush()
         await self.db.refresh(message)
         return message
+
+    async def delete(self, message: Message) -> None:
+        await self.db.delete(message)
+        await self.db.flush()
 
     async def delete_by_conversation(self, conversation_id: int) -> None:
         messages, _ = await self.list_by_conversation(

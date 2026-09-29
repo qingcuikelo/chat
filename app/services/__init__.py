@@ -1,4 +1,5 @@
 from app.services.auth_service import AuthService
+from app.services.cache_service import CacheService
 from app.services.chat_service import ChatService
 from app.services.conversation_service import ConversationService
 from app.services.llm_service import LLMService
@@ -10,4 +11,5 @@ __all__ = [
     "ConversationService",
     "ChatService",
     "LLMService",
+    "CacheService",
 ]

@@ -9,6 +9,7 @@ from app.core.database import get_db
 from app.core.exceptions import TokenExpiredError, UnauthorizedError
 from app.core.security import decode_token
 from app.models.user import User
+from app.services.cache_service import CacheService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -30,7 +31,16 @@ async def get_current_user(
     if claims.get("type") != "access":
         raise UnauthorizedError()
 
-    user = await db.get(User, int(claims["sub"]))
+    user_id = int(claims["sub"])
+
+    cache = CacheService()
+    cached_user = await cache.get_user(user_id)
+    if cached_user is not None:
+        return cached_user
+
+    user = await db.get(User, user_id)
     if user is None:
         raise UnauthorizedError()
+
+    await cache.set_user(user)
     return user

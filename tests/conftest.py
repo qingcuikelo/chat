@@ -40,7 +40,15 @@ async def db_session(session_factory):
 
 
 @pytest_asyncio.fixture
-async def client(session_factory, monkeypatch):
+async def fake_redis(monkeypatch):
+    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr(redis_module, "_client", fake)
+    yield fake
+    await fake.aclose()
+
+
+@pytest_asyncio.fixture
+async def client(session_factory, fake_redis):
     async def override_get_db():
         async with session_factory() as session:
             try:
@@ -51,15 +59,11 @@ async def client(session_factory, monkeypatch):
 
     app.dependency_overrides[get_db] = override_get_db
 
-    fake_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr(redis_module, "_client", fake_redis)
-
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:
         yield async_client
 
     app.dependency_overrides.clear()
-    await fake_redis.aclose()
 
 
 @pytest_asyncio.fixture

@@ -75,7 +75,7 @@ async def test_chat_stream_success(client, auth_headers, monkeypatch, db_session
     assert done_payload["assistant_message_id"] == rows[1].id
 
 
-async def test_chat_llm_error(client, auth_headers, monkeypatch):
+async def test_chat_llm_error(client, auth_headers, monkeypatch, db_session):
     async def failing_stream(self, messages):
         raise LLMError()
         yield ""  # noqa: unreachable  使其成为异步生成器
@@ -89,6 +89,13 @@ async def test_chat_llm_error(client, auth_headers, monkeypatch):
     assert error_event is not None
     assert error_event["code"] == "LLM_ERROR"
     assert "done" not in [name for name, _ in events]
+
+    rows = (
+        await db_session.execute(
+            select(Message).where(Message.conversation_id == conversation_id)
+        )
+    ).scalars().all()
+    assert rows == []
 
 
 async def test_chat_requires_token(client):

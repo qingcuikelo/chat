@@ -1,6 +1,6 @@
 """会话数据访问层。"""
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation
@@ -49,6 +49,15 @@ class ConversationRepository:
         await self.db.flush()
         await self.db.refresh(conversation)
         return conversation
+
+    async def touch(self, conversation_id: int) -> None:
+        """更新会话活跃时间（用于会话列表排序）。"""
+        await self.db.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(updated_at=func.now())
+        )
+        await self.db.flush()
 
     async def delete(self, conversation: Conversation) -> None:
         await self.db.delete(conversation)
