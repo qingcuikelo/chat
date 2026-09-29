@@ -14,9 +14,6 @@
 - **流式传输**：SSE（sse-starlette）
 - **迁移 / 测试**：Alembic、Pytest
 
-## 文档
-
-- 设计文档：[version_design/AI ChatBot (v1_version).md](version_design/AI%20ChatBot%20(v1_version).md)
 
 ## 本地环境
 
