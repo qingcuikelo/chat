@@ -1,0 +1,49 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# ---- 虚拟环境 / Conda ----
+.venv/
+venv/
+env/
+ENV/
+
+# ---- 测试 / 类型检查 / Lint 缓存 ----
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.tox/
+
+# ---- 环境变量与本地数据（禁止入库）----
+.env
+.env.*
+!.env.example
+*.db
+*.sqlite
+*.sqlite3
+
+# ---- 日志与临时文件 ----
+*.log
+logs/
+tmp/
+temp/
+
+# ---- IDE / 编辑器 ----
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ---- 操作系统 ----
+.DS_Store
+Thumbs.db
+desktop.ini
