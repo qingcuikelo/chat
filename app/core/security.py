@@ -1,0 +1,63 @@
+"""JWT 令牌签发 / 校验与密码哈希。"""
+
+from datetime import datetime, timedelta, timezone
+
+import bcrypt
+import jwt
+
+from app.core.config import settings
+
+
+def hash_password(password: str) -> str:
+    if settings.PASSWORD_HASH_SCHEME.lower() == "argon2":
+        from argon2 import PasswordHasher
+
+        return PasswordHasher().hash(password)
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def verify_password(password: str, password_hash: str) -> bool:
+    if settings.PASSWORD_HASH_SCHEME.lower() == "argon2":
+        from argon2 import PasswordHasher
+        from argon2.exceptions import (
+            InvalidHashError,
+            VerificationError,
+            VerifyMismatchError,
+        )
+
+        try:
+            return PasswordHasher().verify(password_hash, password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            return False
+
+    try:
+        return bcrypt.checkpw(password.encode("utf-8"), password_hash.encode("utf-8"))
+    except ValueError:
+        return False
+
+
+def _create_token(subject: int | str, token_type: str, expires_delta: timedelta) -> str:
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": str(subject),
+        "type": token_type,
+        "iat": now,
+        "exp": now + expires_delta,
+    }
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
+
+
+def create_access_token(user_id: int | str) -> str:
+    return _create_token(
+        user_id, "access", timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+
+
+def create_refresh_token(user_id: int | str) -> str:
+    return _create_token(
+        user_id, "refresh", timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    )
+
+
+def decode_token(token: str) -> dict:
+    return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])

@@ -1,0 +1,79 @@
+"""统一业务异常与错误码（对应设计文档 3.8）。"""
+
+
+class AppError(Exception):
+    status_code: int = 500
+    code: str = "INTERNAL_ERROR"
+    message: str = "服务器内部错误"
+
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        code: str | None = None,
+        status_code: int | None = None,
+    ) -> None:
+        self.message = message or type(self).message
+        self.code = code or type(self).code
+        self.status_code = status_code or type(self).status_code
+        super().__init__(self.message)
+
+
+class InvalidRequestError(AppError):
+    status_code = 400
+    code = "INVALID_REQUEST"
+    message = "请求参数校验失败"
+
+
+class UnauthorizedError(AppError):
+    status_code = 401
+    code = "UNAUTHORIZED"
+    message = "未提供或无效的令牌"
+
+
+class TokenExpiredError(AppError):
+    status_code = 401
+    code = "TOKEN_EXPIRED"
+    message = "访问令牌已过期，需刷新"
+
+
+class InvalidCredentialsError(AppError):
+    status_code = 401
+    code = "INVALID_CREDENTIALS"
+    message = "用户名或密码错误"
+
+
+class ForbiddenError(AppError):
+    status_code = 403
+    code = "FORBIDDEN"
+    message = "无权限访问该资源"
+
+
+class ConversationNotFoundError(AppError):
+    status_code = 404
+    code = "CONVERSATION_NOT_FOUND"
+    message = "会话不存在或不属于当前用户"
+
+
+class UserNotFoundError(AppError):
+    status_code = 404
+    code = "USER_NOT_FOUND"
+    message = "用户不存在"
+
+
+class ConflictError(AppError):
+    status_code = 409
+    code = "CONFLICT"
+    message = "资源冲突"
+
+
+class RateLimitedError(AppError):
+    status_code = 429
+    code = "RATE_LIMITED"
+    message = "请求过于频繁，请稍后再试"
+
+
+class LLMError(AppError):
+    status_code = 502
+    code = "LLM_ERROR"
+    message = "上游模型不可用"
