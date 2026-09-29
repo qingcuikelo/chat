@@ -15,6 +15,7 @@ MESSAGE_ROLES = ("system", "user", "assistant")
 
 class Message(Base):
     __tablename__ = "messages"
+    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     conversation_id: Mapped[int] = mapped_column(

@@ -1,5 +1,6 @@
 """聊天业务逻辑：保存消息、构造上下文、流式调用 LLM。"""
 
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
@@ -12,6 +13,8 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.repositories.message_repository import MessageRepository
 from app.services.llm_service import LLMService
+
+logger = logging.getLogger(__name__)
 
 
 def estimate_tokens(text: str) -> int:
@@ -87,6 +90,7 @@ class ChatService:
                 "finish_reason": "stop",
             }
         except Exception:
+            logger.exception("聊天处理失败 request_id=%s", request_id)
             await self.db.rollback()
             await self._set_request_status(request_id, "failed")
             raise

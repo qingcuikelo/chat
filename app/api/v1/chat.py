@@ -1,6 +1,7 @@
 """聊天路由（SSE 流式）。"""
 
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends
@@ -16,6 +17,8 @@ from app.models.user import User
 from app.schemas.chat import ChatRequest
 from app.services.chat_service import ChatService
 from app.services.conversation_service import ConversationService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
 
@@ -49,6 +52,7 @@ async def chat(
                 ),
             }
         except Exception:
+            logger.exception("聊天流式处理异常（流中已发送部分增量）")
             yield {
                 "event": "error",
                 "data": json.dumps(
