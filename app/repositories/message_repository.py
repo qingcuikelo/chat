@@ -45,6 +45,26 @@ class MessageRepository:
         )
         return list(reversed(result.scalars().all()))
 
+    async def list_after(self, conversation_id: int, after_id: int) -> list[Message]:
+        """按时间正序返回 id 大于 after_id 的消息。"""
+        result = await self.db.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id, Message.id > after_id
+            )
+            .order_by(Message.id.asc())
+        )
+        return list(result.scalars().all())
+
+    async def sum_tokens_after(self, conversation_id: int, after_id: int) -> int:
+        """统计 id 大于 after_id 的消息 token_count 之和。"""
+        total = await self.db.scalar(
+            select(func.coalesce(func.sum(Message.token_count), 0)).where(
+                Message.conversation_id == conversation_id, Message.id > after_id
+            )
+        )
+        return int(total or 0)
+
     async def get(self, message_id: int) -> Message | None:
         return await self.db.get(Message, message_id)
 

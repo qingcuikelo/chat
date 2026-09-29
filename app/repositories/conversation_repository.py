@@ -1,6 +1,6 @@
 """会话数据访问层。"""
 
-from sqlalchemy import func, select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import utcnow
@@ -57,6 +57,23 @@ class ConversationRepository:
             update(Conversation)
             .where(Conversation.id == conversation_id)
             .values(updated_at=utcnow())
+        )
+        await self.db.flush()
+
+    async def update_summary(
+        self, conversation_id: int, summary: str, watermark: int
+    ) -> None:
+        """乐观更新滚动摘要与水位线（仅在推进时写入）。"""
+        await self.db.execute(
+            update(Conversation)
+            .where(
+                Conversation.id == conversation_id,
+                or_(
+                    Conversation.summary_until_message_id.is_(None),
+                    Conversation.summary_until_message_id < watermark,
+                ),
+            )
+            .values(summary=summary, summary_until_message_id=watermark)
         )
         await self.db.flush()
 

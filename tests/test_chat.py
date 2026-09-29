@@ -7,6 +7,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.exceptions import LLMError
 from app.models.message import Message
+from app.services.chat_service import ChatService
 from app.services.llm_service import LLMService
 
 API = "/api/v1"
@@ -132,3 +133,74 @@ async def test_chat_rate_limited(client, auth_headers, monkeypatch):
     )
     assert response.status_code == 429
     assert response.json()["detail"]["code"] == "RATE_LIMITED"
+
+
+def test_build_prompt_respects_token_budget(monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_CONTEXT_MAX_TOKENS", 5)
+    history = [
+        {"role": "user", "content": "a" * 100},
+        {"role": "assistant", "content": "b" * 100},
+        {"role": "user", "content": "cccc"},
+    ]
+
+    prompt = ChatService._build_prompt(history)
+
+    assert prompt[0]["role"] == "system"
+    assert len(prompt) == 2
+    assert prompt[1]["content"] == "cccc"
+
+
+async def test_conversation_title_auto_generated(client, auth_headers, monkeypatch):
+    async def fake_stream(self, messages):
+        yield "ok"
+
+    monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
+
+    created = await client.post(f"{API}/conversations", headers=auth_headers, json={})
+    assert created.status_code == 201
+    conversation_id = created.json()["id"]
+    assert created.json()["title"] is None
+
+    await client.post(
+        f"{API}/chat",
+        headers=auth_headers,
+        json={"conversation_id": conversation_id, "message": "  如何   学习 Python  "},
+    )
+
+    detail = (
+        await client.get(f"{API}/conversations/{conversation_id}", headers=auth_headers)
+    ).json()
+    assert detail["title"] == "如何 学习 Python"
+
+    await client.post(
+        f"{API}/chat",
+        headers=auth_headers,
+        json={"conversation_id": conversation_id, "message": "第二条消息"},
+    )
+    detail_again = (
+        await client.get(f"{API}/conversations/{conversation_id}", headers=auth_headers)
+    ).json()
+    assert detail_again["title"] == "如何 学习 Python"
+
+
+async def test_explicit_title_preserved(client, auth_headers, monkeypatch):
+    async def fake_stream(self, messages):
+        yield "ok"
+
+    monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
+
+    created = await client.post(
+        f"{API}/conversations", headers=auth_headers, json={"title": "我的会话"}
+    )
+    conversation_id = created.json()["id"]
+
+    await client.post(
+        f"{API}/chat",
+        headers=auth_headers,
+        json={"conversation_id": conversation_id, "message": "随便说点"},
+    )
+
+    detail = (
+        await client.get(f"{API}/conversations/{conversation_id}", headers=auth_headers)
+    ).json()
+    assert detail["title"] == "我的会话"

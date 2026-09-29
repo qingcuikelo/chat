@@ -48,15 +48,22 @@ class Settings(BaseSettings):
     LLM_BASE_URL: str = "https://api.openai.com/v1"
     LLM_MODEL: str = "gpt-4o-mini"
     LLM_TEMPERATURE: float = 0.7
-    LLM_MAX_TOKENS: int = 2048
-    LLM_TIMEOUT: int = 60
+    LLM_MAX_TOKENS: int = 8192
+    LLM_TIMEOUT: int = 120
     LLM_MAX_RETRIES: int = 2
     LLM_SYSTEM_PROMPT: str = "你是一个乐于助人的 AI 助手。"
+    LLM_SUMMARY_MODEL: str = ""
 
     # ---- 聊天上下文 ----
-    CHAT_CONTEXT_MAX_MESSAGES: int = 20
-    CHAT_CONTEXT_MAX_TOKENS: int = 8000
+    CHAT_CONTEXT_MAX_MESSAGES: int = 40
+    CHAT_CONTEXT_MAX_TOKENS: int = 65536
     CHAT_STREAM_HEARTBEAT: int = 15
+
+    # ---- 上下文滚动摘要 ----
+    CHAT_SUMMARY_ENABLED: bool = True
+    CHAT_SUMMARY_TRIGGER_RATIO: float = 0.8
+    CHAT_SUMMARY_KEEP_RECENT_MESSAGES: int = 20
+    CHAT_SUMMARY_MAX_TOKENS: int = 2048
 
     # ---- 日志 ----
     LOG_LEVEL: str = "INFO"
