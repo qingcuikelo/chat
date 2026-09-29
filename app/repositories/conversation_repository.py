@@ -3,6 +3,7 @@
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import utcnow
 from app.models.conversation import Conversation
 
 
@@ -55,7 +56,7 @@ class ConversationRepository:
         await self.db.execute(
             update(Conversation)
             .where(Conversation.id == conversation_id)
-            .values(updated_at=func.now())
+            .values(updated_at=utcnow())
         )
         await self.db.flush()
 

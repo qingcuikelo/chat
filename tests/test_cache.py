@@ -144,3 +144,33 @@ async def test_chat_bumps_conversation_activity(
     async with session_factory() as session:
         refreshed = await session.get(Conversation, conversation_id)
         assert refreshed.updated_at > old
+
+
+async def test_active_conversation_sorted_first(client, auth_headers, monkeypatch):
+    async def fake_stream(self, messages):
+        yield "ok"
+
+    monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
+
+    first = (
+        await client.post(
+            f"{API}/conversations", headers=auth_headers, json={"title": "A"}
+        )
+    ).json()["id"]
+    second = (
+        await client.post(
+            f"{API}/conversations", headers=auth_headers, json={"title": "B"}
+        )
+    ).json()["id"]
+
+    await client.post(
+        f"{API}/chat",
+        headers=auth_headers,
+        json={"conversation_id": first, "message": "hi"},
+    )
+
+    items = (await client.get(f"{API}/conversations", headers=auth_headers)).json()[
+        "items"
+    ]
+    assert items[0]["id"] == first
+    assert items[1]["id"] == second

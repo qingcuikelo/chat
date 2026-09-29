@@ -1,7 +1,10 @@
 """SQLAlchemy 2.0 异步引擎、会话与声明式基类。"""
 
 from collections.abc import AsyncGenerator
+from datetime import datetime, timezone
 
+from sqlalchemy import DateTime
+from sqlalchemy.dialects import mysql
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -10,6 +13,14 @@ from sqlalchemy.ext.asyncio import (
 from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
+
+# 时间列：MySQL 使用 DATETIME(6) 微秒精度，其他方言使用通用 DateTime。
+TimestampTZ = DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql")
+
+
+def utcnow() -> datetime:
+    """UTC now（naive，含微秒），用于默认值与更新时间。"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):
