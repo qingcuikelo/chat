@@ -10,6 +10,7 @@ from app.core.exceptions import TokenExpiredError, UnauthorizedError
 from app.core.security import decode_token
 from app.models.user import User
 from app.services.cache_service import CacheService
+from app.services.token_service import TokenService
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -29,6 +30,10 @@ async def get_current_user(
         raise UnauthorizedError() from exc
 
     if claims.get("type") != "access":
+        raise UnauthorizedError()
+
+    jti = claims.get("jti")
+    if jti and await TokenService().is_blacklisted(jti):
         raise UnauthorizedError()
 
     user_id = int(claims["sub"])

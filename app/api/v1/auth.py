@@ -1,12 +1,19 @@
 """认证路由。"""
 
 from fastapi import APIRouter, Depends, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.dependencies.auth import get_current_user
+from app.dependencies.auth import bearer_scheme, get_current_user
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, TokenPair
+from app.schemas.auth import (
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenPair,
+)
 from app.schemas.user import UserRead
 from app.services.auth_service import AuthService
 
@@ -35,5 +42,12 @@ async def refresh(
 
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(current_user: User = Depends(get_current_user)) -> None:
-    return None
+async def logout(
+    payload: LogoutRequest | None = None,
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    access_token = credentials.credentials if credentials else ""
+    refresh_token = payload.refresh_token if payload else None
+    await AuthService(db).logout(access_token, refresh_token)

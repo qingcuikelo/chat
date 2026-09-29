@@ -1,4 +1,10 @@
-from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, TokenPair
+from app.schemas.auth import (
+    LoginRequest,
+    LogoutRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenPair,
+)
 from app.schemas.chat import (
     ChatDeltaEvent,
     ChatDoneEvent,
@@ -20,6 +26,7 @@ __all__ = [
     "RegisterRequest",
     "LoginRequest",
     "RefreshRequest",
+    "LogoutRequest",
     "TokenPair",
     "UserCreate",
     "UserRead",

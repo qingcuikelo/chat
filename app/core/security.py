@@ -1,5 +1,6 @@
 """JWT 令牌签发 / 校验与密码哈希。"""
 
+import uuid
 from datetime import datetime, timedelta, timezone
 
 import bcrypt
@@ -41,6 +42,7 @@ def _create_token(subject: int | str, token_type: str, expires_delta: timedelta)
     payload = {
         "sub": str(subject),
         "type": token_type,
+        "jti": uuid.uuid4().hex,
         "iat": now,
         "exp": now + expires_delta,
     }
@@ -61,3 +63,11 @@ def create_refresh_token(user_id: int | str) -> str:
 
 def decode_token(token: str) -> dict:
     return jwt.decode(token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+
+
+def remaining_ttl(claims: dict) -> int:
+    """返回令牌剩余有效秒数（用于黑名单 TTL），下限为 0。"""
+    exp = claims.get("exp")
+    if not exp:
+        return 0
+    return max(0, int(exp) - int(datetime.now(timezone.utc).timestamp()))

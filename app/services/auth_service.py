@@ -14,11 +14,13 @@ from app.core.security import (
     create_refresh_token,
     decode_token,
     hash_password,
+    remaining_ttl,
     verify_password,
 )
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
+from app.services.token_service import TokenService
 from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -26,6 +28,7 @@ class AuthService:
     def __init__(self, db: AsyncSession) -> None:
         self.db = db
         self.users = UserRepository(db)
+        self.tokens = TokenService()
 
     async def register(self, payload: RegisterRequest) -> User:
         if await self.users.get_by_username(payload.username):
@@ -49,29 +52,67 @@ class AuthService:
         user = await self.users.get_by_username_or_email(identifier)
         if user is None or not verify_password(payload.password, user.password_hash):
             raise InvalidCredentialsError()
-        return self._issue_tokens(user.id)
+        return await self._issue_tokens(user.id)
 
     async def refresh(self, refresh_token: str) -> TokenPair:
+        claims = self._decode(refresh_token)
+        if claims.get("type") != "refresh":
+            raise UnauthorizedError("无效的刷新令牌")
+
+        jti = claims.get("jti")
+        if not jti:
+            raise UnauthorizedError("无效的刷新令牌")
+
+        active = await self.tokens.is_refresh_active(jti)
+        if active is False:
+            raise UnauthorizedError("刷新令牌已失效")
+
+        user = await self.users.get(int(claims["sub"]))
+        if user is None:
+            raise UnauthorizedError()
+
+        # 轮换：旧 refresh 一次性作废
+        await self.tokens.revoke_refresh(jti)
+        return await self._issue_tokens(user.id)
+
+    async def logout(self, access_token: str, refresh_token: str | None = None) -> None:
+        """作废当前 access 令牌；如提供 refresh，则一并作废。"""
+        claims = self._decode(access_token)
+        jti = claims.get("jti")
+        if jti:
+            await self.tokens.blacklist_access(jti, remaining_ttl(claims))
+
+        if refresh_token:
+            try:
+                refresh_claims = decode_token(refresh_token)
+            except jwt.InvalidTokenError:
+                refresh_claims = None
+            if (
+                refresh_claims
+                and refresh_claims.get("type") == "refresh"
+                and refresh_claims.get("jti")
+            ):
+                await self.tokens.revoke_refresh(refresh_claims["jti"])
+
+    @staticmethod
+    def _decode(token: str) -> dict:
         try:
-            claims = decode_token(refresh_token)
+            return decode_token(token)
         except jwt.ExpiredSignatureError as exc:
             raise TokenExpiredError() from exc
         except jwt.InvalidTokenError as exc:
             raise UnauthorizedError() from exc
 
-        if claims.get("type") != "refresh":
-            raise UnauthorizedError("无效的刷新令牌")
-
-        user = await self.users.get(int(claims["sub"]))
-        if user is None:
-            raise UnauthorizedError()
-        return self._issue_tokens(user.id)
-
-    @staticmethod
-    def _issue_tokens(user_id: int) -> TokenPair:
+    async def _issue_tokens(self, user_id: int) -> TokenPair:
+        access_token = create_access_token(user_id)
+        refresh_token = create_refresh_token(user_id)
+        refresh_claims = decode_token(refresh_token)
+        await self.tokens.store_refresh(
+            refresh_claims["jti"], user_id, remaining_ttl(refresh_claims)
+        )
         return TokenPair(
-            access_token=create_access_token(user_id),
-            refresh_token=create_refresh_token(user_id),
+            access_token=access_token,
+            refresh_token=refresh_token,
             token_type="bearer",
             expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
