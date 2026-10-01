@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import JSON, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampTZ, utcnow
@@ -15,7 +15,15 @@ MESSAGE_ROLES = ("system", "user", "assistant")
 
 class Message(Base):
     __tablename__ = "messages"
-    __table_args__ = {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"}
+    __table_args__ = (
+        Index(
+            "ix_messages_conversation_id_id_token_count",
+            "conversation_id",
+            "id",
+            "token_count",
+        ),
+        {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     conversation_id: Mapped[int] = mapped_column(
