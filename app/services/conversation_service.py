@@ -63,8 +63,9 @@ class ConversationService:
         return conversation
 
     async def delete(self, conversation_id: int, user_id: int) -> None:
-        conversation = await self.get(conversation_id, user_id)
-        await self.conversations.delete(conversation)
+        await self.get(conversation_id, user_id)
+        await self.messages.delete_by_conversation(conversation_id)
+        await self.conversations.delete_by_id(conversation_id)
         await self.db.commit()
         await self.cache.invalidate_conversation(conversation_id)
         await self.cache.clear_session(conversation_id)

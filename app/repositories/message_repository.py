@@ -2,9 +2,10 @@
 
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.conversation import Conversation
 from app.models.message import Message
 
 
@@ -107,9 +108,18 @@ class MessageRepository:
         await self.db.flush()
 
     async def delete_by_conversation(self, conversation_id: int) -> None:
-        messages, _ = await self.list_by_conversation(
-            conversation_id, page=1, page_size=10**9
+        """按会话批量删除消息（单条 DELETE，避免逐条加载）。"""
+        await self.db.execute(
+            delete(Message).where(Message.conversation_id == conversation_id)
         )
-        for message in messages:
-            await self.db.delete(message)
+        await self.db.flush()
+
+    async def delete_by_user(self, user_id: int) -> None:
+        """按用户批量删除其所有会话下的消息。"""
+        conversation_ids = select(Conversation.id).where(
+            Conversation.user_id == user_id
+        )
+        await self.db.execute(
+            delete(Message).where(Message.conversation_id.in_(conversation_ids))
+        )
         await self.db.flush()

@@ -8,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 
 import app.models  # noqa: F401  确保模型完成注册
 from app.api.v1.router import api_router
@@ -16,6 +17,8 @@ from app.core.config import settings
 from app.core.database import engine
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
+from app.core.middleware import RequestIDMiddleware
+from app.core.redis import get_redis
 from app.workers.queue import close_pool
 
 logger = logging.getLogger(__name__)
@@ -77,11 +80,40 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     register_exception_handlers(app)
+    app.add_middleware(RequestIDMiddleware)
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)
 
     @app.get("/health", tags=["system"])
     async def health() -> dict:
         return {"status": "ok", "app": settings.APP_NAME, "env": settings.APP_ENV}
+
+    @app.get("/health/live", tags=["system"])
+    async def health_live() -> dict:
+        return {"status": "ok"}
+
+    @app.get("/health/ready", tags=["system"])
+    async def health_ready() -> JSONResponse:
+        db_ok = True
+        try:
+            async with engine.connect() as connection:
+                await connection.execute(text("SELECT 1"))
+        except Exception:
+            db_ok = False
+
+        redis_ok = True
+        try:
+            await get_redis().ping()
+        except Exception:
+            redis_ok = False
+
+        if not (db_ok and redis_ok):
+            return JSONResponse(
+                status_code=503,
+                content={"status": "unavailable", "db": db_ok, "redis": redis_ok},
+            )
+        return JSONResponse(
+            status_code=200, content={"status": "ok", "db": db_ok, "redis": redis_ok}
+        )
 
     return app
 

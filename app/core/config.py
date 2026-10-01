@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8000
     CORS_ORIGINS: str = "*"
+    REQUEST_ID_HEADER: str = "X-Request-ID"
 
     # ---- 数据库 ----
     DATABASE_URL: str = "sqlite+aiosqlite:///./aichat.db"
@@ -28,12 +29,15 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = 10
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_RECYCLE: int = 1800
+    DB_POOL_TIMEOUT: int = 30
 
     # ---- Redis ----
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_SESSION_TTL: int = 1800
     REDIS_REQUEST_TTL: int = 600
     REDIS_CACHE_TTL: int = 3600
+    REDIS_SOCKET_TIMEOUT: int = 5
+    REDIS_MAX_CONNECTIONS: int = 50
 
     # ---- 认证与安全 ----
     JWT_SECRET_KEY: str = "change-me-to-a-random-32-byte-secret"

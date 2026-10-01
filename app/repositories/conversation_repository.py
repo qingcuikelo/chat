@@ -1,6 +1,6 @@
 """会话数据访问层。"""
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import utcnow
@@ -80,4 +80,16 @@ class ConversationRepository:
 
     async def delete(self, conversation: Conversation) -> None:
         await self.db.delete(conversation)
+        await self.db.flush()
+
+    async def delete_by_id(self, conversation_id: int) -> None:
+        await self.db.execute(
+            delete(Conversation).where(Conversation.id == conversation_id)
+        )
+        await self.db.flush()
+
+    async def delete_by_user(self, user_id: int) -> None:
+        await self.db.execute(
+            delete(Conversation).where(Conversation.user_id == user_id)
+        )
         await self.db.flush()
