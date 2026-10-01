@@ -42,13 +42,11 @@ class ConversationRepository:
         conversation = Conversation(user_id=user_id, title=title)
         self.db.add(conversation)
         await self.db.flush()
-        await self.db.refresh(conversation)
         return conversation
 
     async def update_title(self, conversation: Conversation, title: str) -> Conversation:
         conversation.title = title
         await self.db.flush()
-        await self.db.refresh(conversation)
         return conversation
 
     async def touch(self, conversation_id: int) -> None:

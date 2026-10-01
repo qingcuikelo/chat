@@ -86,7 +86,6 @@ class MessageRepository:
         )
         self.db.add(message)
         await self.db.flush()
-        await self.db.refresh(message)
         return message
 
     async def delete(self, message: Message) -> None:
