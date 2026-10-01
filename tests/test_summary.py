@@ -5,7 +5,7 @@ from sqlalchemy import select
 from app.core.config import settings
 from app.core.exceptions import LLMError
 from app.models.conversation import Conversation
-from app.services.llm_service import LLMService
+from app.services.llm_service import LLMService, StreamChunk
 
 API = "/api/v1"
 
@@ -37,7 +37,8 @@ async def test_summary_generated_and_injected(client, auth_headers, monkeypatch)
 
     async def fake_stream(self, messages):
         captured["prompts"].append(messages)
-        yield "回复"
+        yield StreamChunk("delta", text="回复")
+        yield StreamChunk("final", finish_reason="stop")
 
     async def fake_complete(self, messages, **kwargs):
         captured["complete_calls"] += 1
@@ -66,7 +67,8 @@ async def test_summary_stored_in_db(client, auth_headers, monkeypatch, db_sessio
     _enable_aggressive_compression(monkeypatch)
 
     async def fake_stream(self, messages):
-        yield "回复"
+        yield StreamChunk("delta", text="回复")
+        yield StreamChunk("final", finish_reason="stop")
 
     async def fake_complete(self, messages, **kwargs):
         return "落库摘要"
@@ -91,7 +93,8 @@ async def test_summary_disabled(client, auth_headers, monkeypatch):
     calls = {"complete": 0}
 
     async def fake_stream(self, messages):
-        yield "回复"
+        yield StreamChunk("delta", text="回复")
+        yield StreamChunk("final", finish_reason="stop")
 
     async def fake_complete(self, messages, **kwargs):
         calls["complete"] += 1
@@ -111,7 +114,8 @@ async def test_summary_failure_falls_back(client, auth_headers, monkeypatch, db_
     _enable_aggressive_compression(monkeypatch)
 
     async def fake_stream(self, messages):
-        yield "回复"
+        yield StreamChunk("delta", text="回复")
+        yield StreamChunk("final", finish_reason="stop")
 
     async def failing_complete(self, messages, **kwargs):
         raise LLMError()

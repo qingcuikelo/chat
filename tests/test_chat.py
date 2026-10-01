@@ -1,5 +1,6 @@
 """聊天 SSE 接口测试（LLM 打桩）。"""
 
+import asyncio
 import json
 
 from sqlalchemy import select
@@ -8,7 +9,7 @@ from app.core.config import settings
 from app.core.exceptions import LLMError
 from app.models.message import Message
 from app.services.chat_service import ChatService
-from app.services.llm_service import LLMService
+from app.services.llm_service import LLMService, StreamChunk
 
 API = "/api/v1"
 
@@ -49,7 +50,8 @@ async def _chat(client, headers, conversation_id: int, message: str = "hi"):
 async def test_chat_stream_success(client, auth_headers, monkeypatch, db_session):
     async def fake_stream(self, messages):
         for token in ["你好", "，", "世界", "😊"]:
-            yield token
+            yield StreamChunk("delta", text=token)
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
@@ -79,7 +81,7 @@ async def test_chat_stream_success(client, auth_headers, monkeypatch, db_session
 async def test_chat_llm_error(client, auth_headers, monkeypatch, db_session):
     async def failing_stream(self, messages):
         raise LLMError()
-        yield ""  # noqa: unreachable  使其成为异步生成器
+        yield StreamChunk("delta", text="")  # noqa: unreachable  使其成为异步生成器
 
     monkeypatch.setattr(LLMService, "stream_chat", failing_stream)
 
@@ -93,10 +95,17 @@ async def test_chat_llm_error(client, auth_headers, monkeypatch, db_session):
 
     rows = (
         await db_session.execute(
-            select(Message).where(Message.conversation_id == conversation_id)
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.id)
         )
     ).scalars().all()
-    assert rows == []
+    assert [row.role for row in rows] == ["user", "assistant"]
+    assert rows[0].token_count == 0
+    assert rows[1].token_count == 0
+    assert rows[1].metadata_["status"] == "failed"
+    assert rows[1].metadata_["error_code"] == "LLM_ERROR"
+    assert rows[1].metadata_["answer_to"] == rows[0].id
 
 
 async def test_chat_requires_token(client):
@@ -118,7 +127,8 @@ async def test_chat_conversation_not_found(client, auth_headers):
 
 async def test_chat_rate_limited(client, auth_headers, monkeypatch):
     async def fake_stream(self, messages):
-        yield "ok"
+        yield StreamChunk("delta", text="ok")
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
     monkeypatch.setattr(settings, "RATE_LIMIT_PER_MINUTE", 1)
@@ -152,7 +162,8 @@ def test_build_prompt_respects_token_budget(monkeypatch):
 
 async def test_conversation_title_auto_generated(client, auth_headers, monkeypatch):
     async def fake_stream(self, messages):
-        yield "ok"
+        yield StreamChunk("delta", text="ok")
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
@@ -185,7 +196,8 @@ async def test_conversation_title_auto_generated(client, auth_headers, monkeypat
 
 async def test_explicit_title_preserved(client, auth_headers, monkeypatch):
     async def fake_stream(self, messages):
-        yield "ok"
+        yield StreamChunk("delta", text="ok")
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
@@ -204,3 +216,115 @@ async def test_explicit_title_preserved(client, auth_headers, monkeypatch):
         await client.get(f"{API}/conversations/{conversation_id}", headers=auth_headers)
     ).json()
     assert detail["title"] == "我的会话"
+
+
+async def test_delta_batching(client, auth_headers, monkeypatch):
+    monkeypatch.setattr(settings, "SSE_BATCH_MIN_CHARS", 4)
+    monkeypatch.setattr(settings, "SSE_BATCH_MAX_INTERVAL_MS", 100000)
+
+    async def fake_stream(self, messages):
+        for token in ["ab", "cd", "ef"]:
+            yield StreamChunk("delta", text=token)
+        yield StreamChunk("final", finish_reason="stop")
+
+    monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
+
+    conversation_id = await _new_conversation(client, auth_headers)
+    events = await _chat(client, auth_headers, conversation_id)
+
+    deltas = [data["content"] for name, data in events if name == "delta"]
+    assert deltas == ["abcd", "ef"]
+
+
+async def test_finish_reason_and_usage_passthrough(
+    client, auth_headers, monkeypatch, db_session
+):
+    async def fake_stream(self, messages):
+        yield StreamChunk("delta", text="部分")
+        yield StreamChunk(
+            "final", finish_reason="length", usage={"completion_tokens": 7}
+        )
+
+    monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
+
+    conversation_id = await _new_conversation(client, auth_headers)
+    events = await _chat(client, auth_headers, conversation_id)
+
+    done = next(data for name, data in events if name == "done")
+    assert done["finish_reason"] == "length"
+    assert done["token_count"] == 7
+
+    rows = (
+        await db_session.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.id)
+        )
+    ).scalars().all()
+    assert rows[1].token_count == 7
+
+
+async def test_failed_turn_excluded_from_prompt(client, auth_headers, monkeypatch):
+    async def failing_stream(self, messages):
+        raise LLMError()
+        yield StreamChunk("delta", text="")  # noqa: unreachable
+
+    monkeypatch.setattr(LLMService, "stream_chat", failing_stream)
+    conversation_id = await _new_conversation(client, auth_headers)
+    await _chat(client, auth_headers, conversation_id, message="失败消息")
+
+    captured: dict = {}
+
+    async def capturing_stream(self, messages):
+        captured["prompt"] = messages
+        yield StreamChunk("delta", text="ok")
+        yield StreamChunk("final", finish_reason="stop")
+
+    monkeypatch.setattr(LLMService, "stream_chat", capturing_stream)
+    await _chat(client, auth_headers, conversation_id, message="新消息")
+
+    joined = " ".join(message["content"] for message in captured["prompt"])
+    assert "失败消息" not in joined
+    user_messages = [
+        message["content"]
+        for message in captured["prompt"]
+        if message["role"] == "user"
+    ]
+    assert user_messages == ["新消息"]
+
+
+async def test_interrupted_turn_persisted(
+    client, auth_headers, session_factory, monkeypatch
+):
+    conversation_id = await _new_conversation(client, auth_headers)
+
+    async def cancelling_stream(self, messages):
+        yield StreamChunk("delta", text="部分")
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(LLMService, "stream_chat", cancelling_stream)
+
+    service = ChatService(session_factory=session_factory)
+    try:
+        async for _ in service.stream_chat(
+            conversation_id=conversation_id, user_message="hi"
+        ):
+            pass
+    except asyncio.CancelledError:
+        pass
+
+    async with session_factory() as session:
+        rows = (
+            await session.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.id)
+            )
+        ).scalars().all()
+
+    assert [row.role for row in rows] == ["user", "assistant"]
+    assert rows[0].token_count == 0
+    assert rows[1].content == "部分"
+    assert rows[1].token_count == 0
+    assert rows[1].metadata_["status"] == "interrupted"
+    assert rows[1].metadata_["answer_to"] == rows[0].id

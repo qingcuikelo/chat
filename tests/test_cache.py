@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import update
 
 from app.models.conversation import Conversation
-from app.services.llm_service import LLMService
+from app.services.llm_service import LLMService, StreamChunk
 
 API = "/api/v1"
 
@@ -52,7 +52,8 @@ async def test_chat_session_cache(client, auth_headers, fake_redis, monkeypatch)
 
     async def fake_stream(self, messages):
         captured["messages"] = messages
-        yield "好的"
+        yield StreamChunk("delta", text="好的")
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
@@ -87,7 +88,8 @@ async def test_clearing_session_on_conversation_delete(
     client, auth_headers, fake_redis, monkeypatch
 ):
     async def fake_stream(self, messages):
-        yield "ok"
+        yield StreamChunk("delta", text="ok")
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
@@ -111,7 +113,8 @@ async def test_chat_bumps_conversation_activity(
     client, auth_headers, fake_redis, session_factory, monkeypatch
 ):
     async def fake_stream(self, messages):
-        yield "ok"
+        yield StreamChunk("delta", text="ok")
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
@@ -148,7 +151,8 @@ async def test_chat_bumps_conversation_activity(
 
 async def test_active_conversation_sorted_first(client, auth_headers, monkeypatch):
     async def fake_stream(self, messages):
-        yield "ok"
+        yield StreamChunk("delta", text="ok")
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 

@@ -38,6 +38,9 @@ class ConversationRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get(self, conversation_id: int) -> Conversation | None:
+        return await self.db.get(Conversation, conversation_id)
+
     async def create(self, *, user_id: int, title: str | None) -> Conversation:
         conversation = Conversation(user_id=user_id, title=title)
         self.db.add(conversation)

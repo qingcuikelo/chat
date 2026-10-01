@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.message import Message
@@ -90,6 +90,20 @@ class MessageRepository:
 
     async def delete(self, message: Message) -> None:
         await self.db.delete(message)
+        await self.db.flush()
+
+    async def exclude_from_context(
+        self, message_id: int, raw_token_count: int
+    ) -> None:
+        """将消息移出上下文预算（token_count 归零，真实值存 metadata）。"""
+        await self.db.execute(
+            update(Message)
+            .where(Message.id == message_id)
+            .values(
+                token_count=0,
+                metadata_={"raw_token_count": raw_token_count},
+            )
+        )
         await self.db.flush()
 
     async def delete_by_conversation(self, conversation_id: int) -> None:

@@ -5,11 +5,11 @@ import logging
 from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.database import get_db, get_session_factory
 from app.core.exceptions import AppError
 from app.core.rate_limit import check_rate_limit
 from app.dependencies.auth import get_current_user
@@ -28,17 +28,22 @@ async def chat(
     payload: ChatRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
 ) -> EventSourceResponse:
     await check_rate_limit(current_user.id)
     conversation = await ConversationService(db).get(
         payload.conversation_id, current_user.id
     )
-    chat_service = ChatService(db)
+    conversation_id = conversation.id
+    # 结束请求级事务，释放连接：流式期间改用独立短生命周期会话
+    await db.rollback()
+
+    chat_service = ChatService(session_factory=session_factory)
 
     async def event_generator() -> AsyncIterator[dict]:
         try:
             async for event, data in chat_service.stream_chat(
-                conversation=conversation, user_message=payload.message
+                conversation_id=conversation_id, user_message=payload.message
             ):
                 yield {
                     "event": event,

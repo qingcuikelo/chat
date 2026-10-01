@@ -1,11 +1,23 @@
 """LLM 调用服务（兼容 OpenAI SDK）。"""
 
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from openai import APIError, AsyncOpenAI
 
 from app.core.config import settings
 from app.core.exceptions import LLMError
+
+
+@dataclass
+class StreamChunk:
+    """流式产出：delta 为增量文本，final 携带结束原因与用量。"""
+
+    kind: Literal["delta", "final"]
+    text: str = ""
+    finish_reason: str | None = None
+    usage: dict[str, Any] | None = None
 
 
 class LLMService:
@@ -22,30 +34,62 @@ class LLMService:
             )
         return cls._client
 
+    async def _open_stream(self, messages: list[dict[str, str]], include_usage: bool):
+        client = self._get_client()
+        kwargs: dict[str, Any] = dict(
+            model=settings.LLM_MODEL,
+            messages=messages,
+            temperature=settings.LLM_TEMPERATURE,
+            max_tokens=settings.LLM_MAX_TOKENS,
+            stream=True,
+        )
+        if include_usage:
+            kwargs["stream_options"] = {"include_usage": True}
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except APIError as exc:
+            if not include_usage:
+                raise LLMError() from exc
+            # 上游不支持 stream_options 时降级重试（无 usage，但有 finish_reason）
+            kwargs.pop("stream_options", None)
+            try:
+                return await client.chat.completions.create(**kwargs)
+            except APIError as retry_exc:
+                raise LLMError() from retry_exc
+
     async def stream_chat(
         self, messages: list[dict[str, str]]
-    ) -> AsyncIterator[str]:
-        client = self._get_client()
+    ) -> AsyncIterator[StreamChunk]:
+        stream = await self._open_stream(
+            messages, include_usage=settings.LLM_STREAM_INCLUDE_USAGE
+        )
+        finish_reason: str | None = None
+        usage: dict[str, Any] | None = None
         try:
-            stream = await client.chat.completions.create(
-                model=settings.LLM_MODEL,
-                messages=messages,
-                temperature=settings.LLM_TEMPERATURE,
-                max_tokens=settings.LLM_MAX_TOKENS,
-                stream=True,
-            )
+            async for chunk in stream:
+                choices = getattr(chunk, "choices", None) or []
+                if choices:
+                    choice = choices[0]
+                    delta = getattr(choice, "delta", None)
+                    content = getattr(delta, "content", None) if delta else None
+                    if content:
+                        yield StreamChunk("delta", text=content)
+                    reason = getattr(choice, "finish_reason", None)
+                    if reason:
+                        finish_reason = reason
+                chunk_usage = getattr(chunk, "usage", None)
+                if chunk_usage is not None:
+                    usage = (
+                        chunk_usage.model_dump()
+                        if hasattr(chunk_usage, "model_dump")
+                        else dict(chunk_usage)
+                    )
         except APIError as exc:
             raise LLMError() from exc
 
-        try:
-            async for chunk in stream:
-                if not chunk.choices:
-                    continue
-                content = getattr(chunk.choices[0].delta, "content", None)
-                if content:
-                    yield content
-        except APIError as exc:
-            raise LLMError() from exc
+        yield StreamChunk(
+            "final", finish_reason=finish_reason or "stop", usage=usage
+        )
 
     async def complete(
         self,

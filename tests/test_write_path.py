@@ -6,7 +6,7 @@ from app.core.security import hash_password
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.repositories.user_repository import UserRepository
-from app.services.llm_service import LLMService
+from app.services.llm_service import LLMService, StreamChunk
 
 API = "/api/v1"
 
@@ -36,7 +36,8 @@ async def test_message_create_does_not_refresh(session_factory, monkeypatch):
 
 async def test_single_chat_turn_commits_twice(client, auth_headers, db_engine, monkeypatch):
     async def fake_stream(self, messages):
-        yield "回复"
+        yield StreamChunk("delta", text="回复")
+        yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 

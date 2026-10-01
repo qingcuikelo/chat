@@ -58,3 +58,8 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         except Exception:
             await session.rollback()
             raise
+
+
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """返回会话工厂，供需要在请求范围外独立建会话的场景（如流式聊天）使用。"""
+    return AsyncSessionLocal

@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.core.redis as redis_module
 import app.models  # noqa: F401  确保模型完成注册
-from app.core.database import Base, get_db
+from app.core.database import Base, get_db, get_session_factory
 from app.main import app
 
 API_PREFIX = "/api/v1"
@@ -58,6 +58,7 @@ async def client(session_factory, fake_redis):
                 raise
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_session_factory] = lambda: session_factory
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as async_client:

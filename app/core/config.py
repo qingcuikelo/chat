@@ -53,11 +53,16 @@ class Settings(BaseSettings):
     LLM_MAX_RETRIES: int = 2
     LLM_SYSTEM_PROMPT: str = "你是一个乐于助人的 AI 助手。"
     LLM_SUMMARY_MODEL: str = ""
+    LLM_STREAM_INCLUDE_USAGE: bool = True
 
     # ---- 聊天上下文 ----
     CHAT_CONTEXT_MAX_MESSAGES: int = 40
     CHAT_CONTEXT_MAX_TOKENS: int = 65536
     CHAT_STREAM_HEARTBEAT: int = 15
+
+    # ---- SSE delta 合批 ----
+    SSE_BATCH_MIN_CHARS: int = 24
+    SSE_BATCH_MAX_INTERVAL_MS: int = 50
 
     # ---- 上下文滚动摘要 ----
     CHAT_SUMMARY_ENABLED: bool = True
