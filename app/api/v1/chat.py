@@ -30,7 +30,9 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
 ) -> EventSourceResponse:
-    await check_rate_limit(current_user.id)
+    await check_rate_limit(
+        f"rate_limit:user:{current_user.id}", settings.RATE_LIMIT_PER_MINUTE
+    )
     conversation = await ConversationService(db).get(
         payload.conversation_id, current_user.id
     )

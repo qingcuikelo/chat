@@ -12,6 +12,7 @@ API = "/api/v1"
 
 def _enable_aggressive_compression(monkeypatch):
     monkeypatch.setattr(settings, "CHAT_SUMMARY_ENABLED", True)
+    monkeypatch.setattr(settings, "SUMMARY_QUEUE_ENABLED", False)
     monkeypatch.setattr(settings, "CHAT_CONTEXT_MAX_TOKENS", 20)
     monkeypatch.setattr(settings, "CHAT_SUMMARY_TRIGGER_RATIO", 0.1)
     monkeypatch.setattr(settings, "CHAT_SUMMARY_KEEP_RECENT_MESSAGES", 1)

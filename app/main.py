@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.database import engine
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
+from app.workers.queue import close_pool
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     setup_logging()
     yield
+    await close_pool()
     await redis_client.close_redis()
     await engine.dispose()
 
@@ -34,6 +36,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content={"detail": {"code": exc.code, "message": exc.message}},
+            headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

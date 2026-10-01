@@ -19,18 +19,14 @@ from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.cache_service import CacheService
 from app.services.llm_service import LLMService, StreamChunk
+from app.services.summary_service import SummaryService
+from app.workers.queue import enqueue_summary
 
 logger = logging.getLogger(__name__)
 
 TITLE_MAX_LENGTH = 30
 
 EXCLUDED_STATUSES = ("failed", "interrupted")
-
-SUMMARY_SYSTEM_PROMPT = (
-    "你是对话摘要助手。请将给定的对话内容压缩为简洁的中文摘要，"
-    "保留关键事实、用户偏好、重要决定与未解决的问题；"
-    "不要遗漏关键信息，不要添加评论或解释。"
-)
 
 
 class ChatService:
@@ -103,22 +99,6 @@ class ChatService:
         ]
 
     @staticmethod
-    def _filter_db_messages(messages: list[Message]) -> list[Message]:
-        excluded_answer_to = {
-            (m.metadata_ or {}).get("answer_to")
-            for m in messages
-            if m.role == "assistant" and (m.metadata_ or {}).get("status") in EXCLUDED_STATUSES
-        }
-        result: list[Message] = []
-        for m in messages:
-            if m.role == "assistant" and (m.metadata_ or {}).get("status") in EXCLUDED_STATUSES:
-                continue
-            if m.role == "user" and m.id in excluded_answer_to:
-                continue
-            result.append(m)
-        return result
-
-    @staticmethod
     def _filter_context(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         excluded_answer_to = {
             m.get("answer_to")
@@ -133,20 +113,6 @@ class ChatService:
                 continue
             result.append(m)
         return result
-
-    @staticmethod
-    def _summary_messages(
-        previous: str | None, messages: list[Message]
-    ) -> list[dict[str, str]]:
-        parts: list[str] = []
-        if previous:
-            parts.append(f"已有摘要：\n{previous}")
-        parts.append("待压缩的对话：")
-        parts.extend(f"{m.role}: {m.content}" for m in messages)
-        return [
-            {"role": "system", "content": SUMMARY_SYSTEM_PROMPT},
-            {"role": "user", "content": "\n".join(parts)},
-        ]
 
     @staticmethod
     def _assistant_token_count(content: str, usage: dict[str, Any] | None) -> int:
@@ -206,59 +172,30 @@ class ChatService:
     async def _maybe_compress_context(
         self, conversation_id: int
     ) -> tuple[str | None, int]:
-        """用量接近预算时，把较早消息滚动压缩为摘要，返回 (摘要, 水位线)。"""
+        """用量接近预算时触发滚动摘要；后台队列优先，失败/关闭时同步回退。"""
         async with self.session_factory() as session:
-            conversations = ConversationRepository(session)
-            messages_repo = MessageRepository(session)
-            conversation = await conversations.get(conversation_id)
-            if conversation is None:
-                return None, 0
-            summary = conversation.summary
-            watermark = conversation.summary_until_message_id or 0
+            service = SummaryService(session)
+            summary, watermark = await service.state(conversation_id)
 
             if not settings.CHAT_SUMMARY_ENABLED:
                 return summary, watermark
 
-            try:
-                used = (
-                    count_tokens(settings.LLM_SYSTEM_PROMPT)
-                    + count_tokens(summary or "")
-                    + await messages_repo.sum_tokens_after(conversation_id, watermark)
-                )
-                threshold = (
-                    settings.CHAT_CONTEXT_MAX_TOKENS
-                    * settings.CHAT_SUMMARY_TRIGGER_RATIO
-                )
-                if used <= threshold:
-                    return summary, watermark
-
-                history = self._filter_db_messages(
-                    await messages_repo.list_after(conversation_id, watermark)
-                )
-                keep = settings.CHAT_SUMMARY_KEEP_RECENT_MESSAGES
-                if len(history) <= keep:
-                    return summary, watermark
-                to_summarize = history[:-keep]
-
-                new_summary = await self.llm.complete(
-                    self._summary_messages(summary, to_summarize),
-                    model=settings.LLM_SUMMARY_MODEL or None,
-                    max_tokens=settings.CHAT_SUMMARY_MAX_TOKENS,
-                )
-                if not new_summary:
-                    return summary, watermark
-
-                new_watermark = to_summarize[-1].id
-                await conversations.update_summary(
-                    conversation_id, new_summary, new_watermark
-                )
-                await session.commit()
-            except Exception:
-                logger.warning(
-                    "生成会话摘要失败 conversation_id=%s", conversation_id, exc_info=True
-                )
-                await session.rollback()
+            if settings.SUMMARY_QUEUE_ENABLED:
+                try:
+                    if await service.should_compress(
+                        conversation_id, summary, watermark
+                    ):
+                        await enqueue_summary(conversation_id)
+                except Exception:
+                    logger.warning(
+                        "投递摘要任务失败，回退同步 conversation_id=%s",
+                        conversation_id,
+                        exc_info=True,
+                    )
+                    return await service.compress(conversation_id)
                 return summary, watermark
+
+            new_summary, new_watermark = await service.compress(conversation_id)
 
         await self.cache.invalidate_conversation(conversation_id)
         return new_summary, new_watermark

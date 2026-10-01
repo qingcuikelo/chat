@@ -12,10 +12,12 @@ class AppError(Exception):
         *,
         code: str | None = None,
         status_code: int | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.message = message or type(self).message
         self.code = code or type(self).code
         self.status_code = status_code or type(self).status_code
+        self.headers = headers
         super().__init__(self.message)
 
 
