@@ -110,3 +110,26 @@ async def test_verification_can_be_disabled(client, monkeypatch):
         f"{API}/auth/login", json={"username": "alice", "password": "Passw0rd!"}
     )
     assert login.status_code == 200
+
+
+async def test_verify_email_get_page_success(client):
+    registered = await _register(client)
+    user_id = registered.json()["id"]
+    token = create_email_verification_token(user_id, "alice@example.com")
+
+    response = await client.get(f"{API}/auth/verify-email", params={"token": token})
+    assert response.status_code == 200
+    assert "邮箱验证成功" in response.text
+
+    login = await client.post(
+        f"{API}/auth/login", json={"username": "alice", "password": "Passw0rd!"}
+    )
+    assert login.status_code == 200
+
+
+async def test_verify_email_get_page_invalid(client):
+    response = await client.get(
+        f"{API}/auth/verify-email", params={"token": "not-a-token"}
+    )
+    assert response.status_code == 400
+    assert "邮箱验证失败" in response.text

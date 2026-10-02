@@ -63,6 +63,8 @@ class Settings(BaseSettings):
     EMAIL_VERIFICATION_REQUIRED: bool = True
     EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 1440
     APP_BASE_URL: str = "http://localhost:5173"
+    # 后端对外地址（用于拼接验证邮件链接）
+    PUBLIC_API_BASE_URL: str = "http://127.0.0.1:8000"
 
     # ---- 邮件（SMTP）----
     SMTP_HOST: str = ""

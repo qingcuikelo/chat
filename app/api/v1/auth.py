@@ -1,11 +1,13 @@
 """认证路由。"""
 
 from fastapi import APIRouter, Depends, Request, status
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.exceptions import AppError
 from app.core.rate_limit import check_rate_limit, get_client_ip
 from app.core.security import decode_token
 from app.dependencies.auth import bearer_scheme, get_current_user
@@ -23,6 +25,27 @@ from app.schemas.user import UserRead
 from app.services.auth_service import AuthService
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+def _verify_result_page(success: bool, message: str) -> str:
+    color = "#16a34a" if success else "#dc2626"
+    title = "邮箱验证成功" if success else "邮箱验证失败"
+    back_link = (
+        f'<p><a href="{settings.APP_BASE_URL}">返回应用</a></p>' if success else ""
+    )
+    return (
+        "<!doctype html><html lang=\"zh-CN\"><head>"
+        "<meta charset=\"utf-8\">"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        f"<title>{title}</title></head>"
+        "<body style=\"font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;"
+        "margin: 0; display: flex; min-height: 100vh; align-items: center;"
+        "justify-content: center; background: #f8fafc;\">"
+        "<div style=\"text-align: center; padding: 32px;\">"
+        f"<h1 style=\"color: {color}; margin-bottom: 8px;\">{title}</h1>"
+        f"<p style=\"color: #334155;\">{message}</p>"
+        f"{back_link}</div></body></html>"
+    )
 
 
 @router.post(
@@ -107,6 +130,29 @@ async def verify_email(
     )
     user = await AuthService(db).verify_email(payload.token)
     return {"email_verified": user.email_verified}
+
+
+@router.get("/verify-email", response_class=HTMLResponse)
+async def verify_email_page(
+    token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> HTMLResponse:
+    """邮件链接直接点击的验证入口，返回 HTML 结果页。"""
+    try:
+        await check_rate_limit(
+            f"rate_limit:verify:ip:{get_client_ip(request)}",
+            settings.RATE_LIMIT_VERIFY_PER_MINUTE,
+        )
+        await AuthService(db).verify_email(token)
+    except AppError as exc:
+        status_code = exc.status_code if exc.status_code in (400, 429) else 400
+        return HTMLResponse(
+            _verify_result_page(False, exc.message), status_code=status_code
+        )
+    return HTMLResponse(
+        _verify_result_page(True, "邮箱验证成功，现在可以返回应用登录。")
+    )
 
 
 @router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)

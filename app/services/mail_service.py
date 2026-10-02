@@ -13,7 +13,10 @@ logger = logging.getLogger(__name__)
 
 class MailService:
     def build_verification_email(self, to_email: str, token: str) -> EmailMessage:
-        link = f"{settings.APP_BASE_URL.rstrip('/')}/verify-email?token={token}"
+        link = (
+            f"{settings.PUBLIC_API_BASE_URL.rstrip('/')}"
+            f"{settings.API_V1_PREFIX}/auth/verify-email?token={token}"
+        )
         message = EmailMessage()
         message["From"] = settings.MAIL_FROM
         message["To"] = to_email
