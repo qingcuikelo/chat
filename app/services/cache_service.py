@@ -38,6 +38,8 @@ def user_to_cache(user: User) -> dict[str, str]:
         "id": str(user.id),
         "username": user.username,
         "email": user.email,
+        "email_verified": "1" if user.email_verified else "0",
+        "email_verified_at": _iso(user.email_verified_at),
         "created_at": _iso(user.created_at),
         "updated_at": _iso(user.updated_at),
     }
@@ -48,6 +50,8 @@ def user_from_cache(data: dict[str, str]) -> User:
         id=int(data["id"]),
         username=data["username"],
         email=data["email"],
+        email_verified=data.get("email_verified") == "1",
+        email_verified_at=_parse_dt(data.get("email_verified_at")),
         created_at=_parse_dt(data.get("created_at")),
         updated_at=_parse_dt(data.get("updated_at")),
     )

@@ -3,9 +3,12 @@
 import jwt
 
 from app.core.config import settings
+from app.core.database import utcnow
 from app.core.exceptions import (
     ConflictError,
+    EmailNotVerifiedError,
     InvalidCredentialsError,
+    InvalidRequestError,
     TokenExpiredError,
     UnauthorizedError,
 )
@@ -20,6 +23,8 @@ from app.core.security import (
 from app.models.user import User
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
+from app.services.cache_service import CacheService
+from app.services.mail_service import dispatch_verification_email
 from app.services.token_service import TokenService
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,6 +34,7 @@ class AuthService:
         self.db = db
         self.users = UserRepository(db)
         self.tokens = TokenService()
+        self.cache = CacheService()
 
     async def register(self, payload: RegisterRequest) -> User:
         if await self.users.get_by_username(payload.username):
@@ -41,7 +47,13 @@ class AuthService:
             email=payload.email,
             password_hash=hash_password(payload.password),
         )
+        if not settings.EMAIL_VERIFICATION_REQUIRED:
+            user.email_verified = True
+            user.email_verified_at = utcnow()
         await self.db.commit()
+
+        if settings.EMAIL_VERIFICATION_REQUIRED:
+            await dispatch_verification_email(user)
         return user
 
     async def login(self, payload: LoginRequest) -> TokenPair:
@@ -52,7 +64,38 @@ class AuthService:
         user = await self.users.get_by_username_or_email(identifier)
         if user is None or not verify_password(payload.password, user.password_hash):
             raise InvalidCredentialsError()
+        if settings.EMAIL_VERIFICATION_REQUIRED and not user.email_verified:
+            raise EmailNotVerifiedError()
         return await self._issue_tokens(user.id)
+
+    async def verify_email(self, token: str) -> User:
+        try:
+            claims = decode_token(token)
+        except jwt.ExpiredSignatureError as exc:
+            raise InvalidRequestError("验证链接已过期") from exc
+        except jwt.InvalidTokenError as exc:
+            raise InvalidRequestError("验证链接无效") from exc
+
+        if claims.get("type") != "email_verify":
+            raise InvalidRequestError("验证链接无效")
+
+        user = await self.users.get(int(claims["sub"]))
+        if user is None or user.email != claims.get("email"):
+            raise InvalidRequestError("验证链接无效")
+
+        if not user.email_verified:
+            user.email_verified = True
+            user.email_verified_at = utcnow()
+            await self.db.commit()
+            await self.cache.invalidate_user(user.id)
+        return user
+
+    async def resend_verification(self, email: str) -> None:
+        """始终静默处理，避免账号枚举（是否发送由内部判断）。"""
+        user = await self.users.get_by_email(email)
+        if user is None or user.email_verified:
+            return
+        await dispatch_verification_email(user)
 
     async def refresh(self, refresh_token: str) -> TokenPair:
         claims = self._decode(refresh_token)

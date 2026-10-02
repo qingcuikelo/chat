@@ -10,9 +10,22 @@ from sqlalchemy.pool import StaticPool
 import app.core.redis as redis_module
 import app.models  # noqa: F401  确保模型完成注册
 from app.core.database import Base, get_db, get_session_factory
+from app.core.security import create_email_verification_token
 from app.main import app
 
 API_PREFIX = "/api/v1"
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _stub_enqueue_verification_email(monkeypatch):
+    """默认不打桩真实 ARQ：验证邮件投递改为 no-op。"""
+
+    async def _noop(*args, **kwargs):
+        return None
+
+    import app.workers.queue as queue_module
+
+    monkeypatch.setattr(queue_module, "enqueue_verification_email", _noop)
 
 
 @pytest_asyncio.fixture
@@ -76,10 +89,15 @@ async def create_user_token(client):
         email: str = "alice@example.com",
         password: str = "Passw0rd!",
     ) -> dict[str, str]:
-        await client.post(
+        registered = await client.post(
             f"{API_PREFIX}/auth/register",
             json={"username": username, "email": email, "password": password},
         )
+        user_id = registered.json()["id"]
+        # 直接生成验证令牌完成邮箱验证（不依赖 SMTP / worker）
+        token = create_email_verification_token(user_id, email)
+        await client.post(f"{API_PREFIX}/auth/verify-email", json={"token": token})
+
         response = await client.post(
             f"{API_PREFIX}/auth/login",
             json={"username": username, "password": password},

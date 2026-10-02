@@ -55,6 +55,23 @@ class Settings(BaseSettings):
     RATE_LIMIT_TRUST_FORWARDED_HEADERS: bool = False
     RATE_LIMIT_CLIENT_IP_HEADER: str = "X-Forwarded-For"
     TRUSTED_PROXIES: str = ""
+    RATE_LIMIT_RESEND_PER_MINUTE: int = 3
+    RATE_LIMIT_RESEND_IP_PER_MINUTE: int = 10
+    RATE_LIMIT_VERIFY_PER_MINUTE: int = 10
+
+    # ---- 邮箱验证 ----
+    EMAIL_VERIFICATION_REQUIRED: bool = True
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES: int = 1440
+    APP_BASE_URL: str = "http://localhost:5173"
+
+    # ---- 邮件（SMTP）----
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    SMTP_USE_SSL: bool = False
+    MAIL_FROM: str = "no-reply@example.com"
 
     # ---- 后台任务（ARQ）----
     ARQ_REDIS_URL: str = ""

@@ -38,3 +38,8 @@ async def enqueue_summary(conversation_id: int) -> None:
         conversation_id,
         _job_id=f"summarize:{conversation_id}",
     )
+
+
+async def enqueue_verification_email(to_email: str, token: str) -> None:
+    pool = await get_pool()
+    await pool.enqueue_job("send_verification_email", to_email, token)

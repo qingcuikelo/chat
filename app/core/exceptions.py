@@ -51,6 +51,12 @@ class ForbiddenError(AppError):
     message = "无权限访问该资源"
 
 
+class EmailNotVerifiedError(AppError):
+    status_code = 403
+    code = "EMAIL_NOT_VERIFIED"
+    message = "邮箱尚未验证，请先完成邮箱验证"
+
+
 class ConversationNotFoundError(AppError):
     status_code = 404
     code = "CONVERSATION_NOT_FOUND"

@@ -2,7 +2,7 @@
 
 from app.core.logging import setup_logging
 from app.workers.queue import redis_settings
-from app.workers.tasks import summarize_conversation
+from app.workers.tasks import send_verification_email, summarize_conversation
 
 
 async def on_startup(ctx) -> None:
@@ -10,7 +10,7 @@ async def on_startup(ctx) -> None:
 
 
 class WorkerSettings:
-    functions = [summarize_conversation]
+    functions = [summarize_conversation, send_verification_email]
     redis_settings = redis_settings()
     max_jobs = 10
     job_timeout = 120

@@ -15,7 +15,9 @@ from app.schemas.auth import (
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    ResendVerificationRequest,
     TokenPair,
+    VerifyEmailRequest,
 )
 from app.schemas.user import UserRead
 from app.services.auth_service import AuthService
@@ -91,3 +93,36 @@ async def logout(
     access_token = credentials.credentials if credentials else ""
     refresh_token = payload.refresh_token if payload else None
     await AuthService(db).logout(access_token, refresh_token)
+
+
+@router.post("/verify-email")
+async def verify_email(
+    payload: VerifyEmailRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await check_rate_limit(
+        f"rate_limit:verify:ip:{get_client_ip(request)}",
+        settings.RATE_LIMIT_VERIFY_PER_MINUTE,
+    )
+    user = await AuthService(db).verify_email(payload.token)
+    return {"email_verified": user.email_verified}
+
+
+@router.post("/resend-verification", status_code=status.HTTP_202_ACCEPTED)
+async def resend_verification(
+    payload: ResendVerificationRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    email = str(payload.email).lower()
+    await check_rate_limit(
+        f"rate_limit:resend:account:{email}",
+        settings.RATE_LIMIT_RESEND_PER_MINUTE,
+    )
+    await check_rate_limit(
+        f"rate_limit:resend:ip:{get_client_ip(request)}",
+        settings.RATE_LIMIT_RESEND_IP_PER_MINUTE,
+    )
+    await AuthService(db).resend_verification(email)
+    return {"status": "accepted"}

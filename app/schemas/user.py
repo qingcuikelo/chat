@@ -24,5 +24,6 @@ class UserRead(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    email_verified: bool = False
     created_at: datetime
     updated_at: datetime

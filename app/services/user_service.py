@@ -2,6 +2,7 @@
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.exceptions import ConflictError, UserNotFoundError
 from app.core.security import hash_password
 from app.models.user import User
@@ -10,6 +11,7 @@ from app.repositories.message_repository import MessageRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserUpdate
 from app.services.cache_service import CacheService
+from app.services.mail_service import dispatch_verification_email
 
 
 class UserService:
@@ -32,6 +34,8 @@ class UserService:
             if await self.users.get_by_email(payload.email):
                 raise ConflictError(code="EMAIL_TAKEN", message="邮箱已被占用")
 
+        email_changed = payload.email is not None and payload.email != user.email
+
         fields: dict = {}
         if payload.username is not None:
             fields["username"] = payload.username
@@ -39,10 +43,17 @@ class UserService:
             fields["email"] = payload.email
         if payload.password is not None:
             fields["password_hash"] = hash_password(payload.password)
+        if email_changed and settings.EMAIL_VERIFICATION_REQUIRED:
+            # 邮箱变更后需重新验证
+            fields["email_verified"] = False
+            fields["email_verified_at"] = None
 
         user = await self.users.update(user, **fields)
         await self.db.commit()
         await self.cache.invalidate_user(user.id)
+
+        if email_changed and settings.EMAIL_VERIFICATION_REQUIRED:
+            await dispatch_verification_email(user)
         return user
 
     async def delete_me(self, current_user: User) -> None:

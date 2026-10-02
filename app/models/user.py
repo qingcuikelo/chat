@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import String, func
+from sqlalchemy import Boolean, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampTZ, utcnow
@@ -18,6 +18,12 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True, index=True, nullable=False)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    email_verified: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="0", nullable=False
+    )
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        TimestampTZ, nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         TimestampTZ, default=utcnow, server_default=func.now(), nullable=False
     )
