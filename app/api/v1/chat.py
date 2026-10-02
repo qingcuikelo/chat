@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
 from app.core.config import settings
+from app.core.context import conversation_id_var
 from app.core.database import get_db, get_session_factory
 from app.core.exceptions import AppError
 from app.core.rate_limit import check_rate_limit
@@ -37,6 +38,7 @@ async def chat(
         payload.conversation_id, current_user.id
     )
     conversation_id = conversation.id
+    conversation_id_var.set(str(conversation_id))
     # 结束请求级事务，释放连接：流式期间改用独立短生命周期会话
     await db.rollback()
 

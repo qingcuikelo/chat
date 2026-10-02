@@ -94,6 +94,10 @@ class Settings(BaseSettings):
     # ---- 日志 ----
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "text"
+    # 可选：日志文件路径（留空只输出到 stdout）；带轮转
+    LOG_FILE: str = ""
+    LOG_FILE_MAX_BYTES: int = 10 * 1024 * 1024
+    LOG_FILE_BACKUP_COUNT: int = 5
 
     @property
     def cors_origins_list(self) -> list[str]:

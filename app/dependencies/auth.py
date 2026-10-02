@@ -5,6 +5,7 @@ from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.context import user_id_var
 from app.core.database import get_db
 from app.core.exceptions import TokenExpiredError, UnauthorizedError
 from app.core.security import decode_token
@@ -37,6 +38,7 @@ async def get_current_user(
         raise UnauthorizedError()
 
     user_id = int(claims["sub"])
+    user_id_var.set(str(user_id))
 
     cache = CacheService()
     cached_user = await cache.get_user(user_id)

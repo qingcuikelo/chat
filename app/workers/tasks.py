@@ -2,6 +2,7 @@
 
 import logging
 
+from app.core.context import conversation_id_var
 from app.core.database import AsyncSessionLocal
 from app.core.redis import get_redis
 from app.services.cache_service import CacheService
@@ -14,6 +15,7 @@ LOCK_TTL_SECONDS = 60
 
 
 async def summarize_conversation(ctx, conversation_id: int) -> None:
+    conversation_id_var.set(str(conversation_id))
     redis = get_redis()
     lock_key = LOCK_KEY.format(conversation_id=conversation_id)
     acquired = await redis.set(lock_key, "1", nx=True, ex=LOCK_TTL_SECONDS)
