@@ -43,29 +43,36 @@ async def chat(
     chat_service = ChatService(session_factory=session_factory)
 
     async def event_generator() -> AsyncIterator[dict]:
+        sequence = 0
         try:
             async for event, data in chat_service.stream_chat(
                 conversation_id=conversation_id, user_message=payload.message
             ):
+                sequence += 1
                 yield {
                     "event": event,
                     "data": json.dumps(data, ensure_ascii=False),
+                    "id": str(sequence),
                 }
         except AppError as exc:
+            sequence += 1
             yield {
                 "event": "error",
                 "data": json.dumps(
                     {"code": exc.code, "message": exc.message}, ensure_ascii=False
                 ),
+                "id": str(sequence),
             }
         except Exception:
             logger.exception("聊天流式处理异常（流中已发送部分增量）")
+            sequence += 1
             yield {
                 "event": "error",
                 "data": json.dumps(
                     {"code": "INTERNAL_ERROR", "message": "服务器内部错误"},
                     ensure_ascii=False,
                 ),
+                "id": str(sequence),
             }
 
     return EventSourceResponse(

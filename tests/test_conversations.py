@@ -1,6 +1,22 @@
 """会话与消息接口测试。"""
 
+from app.services.llm_service import LLMService, StreamChunk
+
 API = "/api/v1"
+
+
+async def _seed_chat(client, headers, conversation_id, monkeypatch, rounds=3):
+    async def fake_stream(self, messages):
+        yield StreamChunk("delta", text="回复")
+        yield StreamChunk("final", finish_reason="stop")
+
+    monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
+    for _ in range(rounds):
+        await client.post(
+            f"{API}/chat",
+            headers=headers,
+            json={"conversation_id": conversation_id, "message": "hi"},
+        )
 
 
 async def test_create_conversation(client, auth_headers):
@@ -104,3 +120,29 @@ async def test_list_messages_empty(client, auth_headers):
     assert body["items"] == []
     assert body["total"] == 0
     assert body["page"] == 1
+
+
+async def test_messages_keyset_pagination(client, auth_headers, monkeypatch):
+    created = await client.post(
+        f"{API}/conversations", headers=auth_headers, json={}
+    )
+    conversation_id = created.json()["id"]
+    await _seed_chat(client, auth_headers, conversation_id, monkeypatch, rounds=3)
+
+    collected: list[int] = []
+    cursor = 0
+    for _ in range(10):
+        response = await client.get(
+            f"{API}/conversations/{conversation_id}/messages",
+            headers=auth_headers,
+            params={"cursor": cursor, "page_size": 2},
+        )
+        body = response.json()
+        collected.extend(item["id"] for item in body["items"])
+        if body["next_cursor"] is None:
+            break
+        cursor = body["next_cursor"]
+
+    assert len(collected) == 6
+    assert collected == sorted(collected)
+    assert len(set(collected)) == 6

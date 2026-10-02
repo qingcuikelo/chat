@@ -78,8 +78,20 @@ class ConversationService:
         page: int = 1,
         page_size: int = 50,
         order: str = "asc",
+        cursor: int | None = None,
     ) -> tuple[list[Message], int]:
         await self.get(conversation_id, user_id)
+        if cursor is not None:
+            if order == "asc":
+                items = await self.messages.list_keyset_after(
+                    conversation_id, cursor, page_size
+                )
+            else:
+                items = await self.messages.list_keyset_before(
+                    conversation_id, cursor, page_size
+                )
+            total = await self.messages.count_by_conversation(conversation_id)
+            return items, total
         return await self.messages.list_by_conversation(
             conversation_id, page=page, page_size=page_size, order=order
         )

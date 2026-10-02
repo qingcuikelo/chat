@@ -81,6 +81,10 @@ class Settings(BaseSettings):
     SSE_BATCH_MIN_CHARS: int = 24
     SSE_BATCH_MAX_INTERVAL_MS: int = 50
 
+    # ---- token 计数 ----
+    # 留空使用 CJK 感知启发式估算；填入 tiktoken 编码名（如 cl100k_base）则用其精确计数
+    TOKENIZER_ENCODING: str = ""
+
     # ---- 上下文滚动摘要 ----
     CHAT_SUMMARY_ENABLED: bool = True
     CHAT_SUMMARY_TRIGGER_RATIO: float = 0.8

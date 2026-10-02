@@ -46,6 +46,42 @@ class MessageRepository:
         )
         return list(reversed(result.scalars().all()))
 
+    async def count_by_conversation(self, conversation_id: int) -> int:
+        total = await self.db.scalar(
+            select(func.count())
+            .select_from(Message)
+            .where(Message.conversation_id == conversation_id)
+        )
+        return int(total or 0)
+
+    async def list_keyset_after(
+        self, conversation_id: int, after_id: int, limit: int
+    ) -> list[Message]:
+        """keyset 分页（正序）：返回 id 大于 after_id 的前 limit 条。"""
+        result = await self.db.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id, Message.id > after_id
+            )
+            .order_by(Message.id.asc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def list_keyset_before(
+        self, conversation_id: int, before_id: int, limit: int
+    ) -> list[Message]:
+        """keyset 分页（倒序）：返回 id 小于 before_id 的前 limit 条。"""
+        result = await self.db.execute(
+            select(Message)
+            .where(
+                Message.conversation_id == conversation_id, Message.id < before_id
+            )
+            .order_by(Message.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def list_after(self, conversation_id: int, after_id: int) -> list[Message]:
         """按时间正序返回 id 大于 after_id 的消息。"""
         result = await self.db.execute(

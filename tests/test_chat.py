@@ -293,6 +293,29 @@ async def test_failed_turn_excluded_from_prompt(client, auth_headers, monkeypatc
     assert user_messages == ["新消息"]
 
 
+async def test_sse_events_have_sequence_ids(client, auth_headers, monkeypatch):
+    async def fake_stream(self, messages):
+        yield StreamChunk("delta", text="a")
+        yield StreamChunk("final", finish_reason="stop")
+
+    monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
+
+    conversation_id = await _new_conversation(client, auth_headers)
+    response = await client.post(
+        f"{API}/chat",
+        headers=auth_headers,
+        json={"conversation_id": conversation_id, "message": "hi"},
+    )
+    text = response.text.replace("\r\n", "\n")
+    ids = [
+        line[len("id:") :].strip()
+        for line in text.splitlines()
+        if line.startswith("id:")
+    ]
+    assert ids == [str(index) for index in range(1, len(ids) + 1)]
+    assert len(ids) == 3
+
+
 async def test_interrupted_turn_persisted(
     client, auth_headers, session_factory, monkeypatch
 ):

@@ -78,6 +78,7 @@ async def list_messages(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     order: Literal["asc", "desc"] = Query("asc"),
+    cursor: int | None = Query(None, ge=0),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
@@ -87,5 +88,15 @@ async def list_messages(
         page=page,
         page_size=page_size,
         order=order,
+        cursor=cursor,
     )
-    return {"items": items, "total": total, "page": page, "page_size": page_size}
+    next_cursor = (
+        items[-1].id if cursor is not None and len(items) == page_size else None
+    )
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "next_cursor": next_cursor,
+    }
