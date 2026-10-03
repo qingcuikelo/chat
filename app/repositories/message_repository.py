@@ -105,6 +105,10 @@ class MessageRepository:
     async def get(self, message_id: int) -> Message | None:
         return await self.db.get(Message, message_id)
 
+    async def max_id(self) -> int:
+        value = await self.db.scalar(select(func.max(Message.id)))
+        return int(value or 0)
+
     async def create(
         self,
         *,
@@ -113,6 +117,7 @@ class MessageRepository:
         content: str,
         token_count: int | None = None,
         metadata: dict[str, Any] | None = None,
+        message_id: int | None = None,
     ) -> Message:
         message = Message(
             conversation_id=conversation_id,
@@ -121,6 +126,8 @@ class MessageRepository:
             token_count=token_count,
             metadata_=metadata,
         )
+        if message_id is not None:
+            message.id = message_id
         self.db.add(message)
         await self.db.flush()
         return message

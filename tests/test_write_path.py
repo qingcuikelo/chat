@@ -34,7 +34,7 @@ async def test_message_create_does_not_refresh(session_factory, monkeypatch):
         assert message.created_at is not None
 
 
-async def test_single_chat_turn_commits_twice(client, auth_headers, db_engine, monkeypatch):
+async def test_single_chat_turn_commits_once(client, auth_headers, db_engine, monkeypatch):
     async def fake_stream(self, messages):
         yield StreamChunk("delta", text="回复")
         yield StreamChunk("final", finish_reason="stop")
@@ -58,4 +58,4 @@ async def test_single_chat_turn_commits_twice(client, auth_headers, db_engine, m
     finally:
         event.remove(db_engine.sync_engine, "commit", on_commit)
 
-    assert len(commits) == 2
+    assert len(commits) == 1
