@@ -63,6 +63,12 @@ class ConversationNotFoundError(AppError):
     message = "会话不存在或不属于当前用户"
 
 
+class StreamNotFoundError(AppError):
+    status_code = 404
+    code = "STREAM_NOT_FOUND"
+    message = "聊天流不存在或已过期"
+
+
 class UserNotFoundError(AppError):
     status_code = 404
     code = "USER_NOT_FOUND"

@@ -100,6 +100,13 @@ class Settings(BaseSettings):
     SSE_BATCH_MIN_CHARS: int = 24
     SSE_BATCH_MAX_INTERVAL_MS: int = 50
 
+    # ---- 聊天流缓冲 / 断点续传 ----
+    CHAT_STREAM_TTL: int = 300
+    CHAT_STREAM_POLL_MS: int = 50
+    CHAT_STREAM_STALE_SECONDS: int = 30
+    # 无订阅者宽限期（秒）；0 = 不放弃、继续生成到完成
+    CHAT_STREAM_ABANDON_TIMEOUT: int = 0
+
     # ---- token 计数 ----
     # 留空使用 CJK 感知启发式估算；填入 tiktoken 编码名（如 cl100k_base）则用其精确计数
     TOKENIZER_ENCODING: str = ""

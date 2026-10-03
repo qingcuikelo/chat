@@ -293,7 +293,7 @@ async def test_failed_turn_excluded_from_prompt(client, auth_headers, monkeypatc
     assert user_messages == ["新消息"]
 
 
-async def test_sse_events_have_sequence_ids(client, auth_headers, monkeypatch):
+async def test_sse_events_have_stream_ids(client, auth_headers, monkeypatch):
     async def fake_stream(self, messages):
         yield StreamChunk("delta", text="a")
         yield StreamChunk("final", finish_reason="stop")
@@ -312,27 +312,36 @@ async def test_sse_events_have_sequence_ids(client, auth_headers, monkeypatch):
         for line in text.splitlines()
         if line.startswith("id:")
     ]
-    assert ids == [str(index) for index in range(1, len(ids) + 1)]
     assert len(ids) == 3
+    assert all(ids)
+    assert len(set(ids)) == 3
 
 
-async def test_interrupted_turn_persisted(
+async def test_generation_cancel_persists_interrupted(
     client, auth_headers, session_factory, monkeypatch
 ):
     conversation_id = await _new_conversation(client, auth_headers)
 
-    async def cancelling_stream(self, messages):
+    async def slow_stream(self, messages):
         yield StreamChunk("delta", text="部分")
-        raise asyncio.CancelledError()
+        await asyncio.sleep(5)
+        yield StreamChunk("final", finish_reason="stop")
 
-    monkeypatch.setattr(LLMService, "stream_chat", cancelling_stream)
+    monkeypatch.setattr(LLMService, "stream_chat", slow_stream)
 
     service = ChatService(session_factory=session_factory)
+    task = asyncio.create_task(
+        service.run_generation(
+            request_id="req_test_interrupted",
+            conversation_id=conversation_id,
+            user_id=1,
+            user_message="hi",
+        )
+    )
+    await asyncio.sleep(0.2)
+    task.cancel()
     try:
-        async for _ in service.stream_chat(
-            conversation_id=conversation_id, user_message="hi"
-        ):
-            pass
+        await task
     except asyncio.CancelledError:
         pass
 

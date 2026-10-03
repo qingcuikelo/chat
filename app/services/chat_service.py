@@ -1,9 +1,12 @@
-"""聊天业务逻辑：保存消息、构造上下文、流式调用 LLM。"""
+"""聊天业务逻辑：保存消息、构造上下文、流式调用 LLM。
+
+v2 WP4e：生成与连接解耦——`run_generation` 作为独立任务生产事件到 Redis Stream，
+`iter_stream` 负责消费（支持 `Last-Event-ID` 断点续传）。
+"""
 
 import asyncio
 import logging
 import time
-import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -12,13 +15,18 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal
-from app.core.redis import get_redis
 from app.core.tokens import count_tokens
 from app.models.message import Message
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
 from app.services.cache_service import CacheService
-from app.services.llm_service import LLMService, StreamChunk
+from app.services.llm_service import LLMService
+from app.services.stream_service import (
+    STATUS_COMPLETED,
+    STATUS_FAILED,
+    TERMINAL_STATUSES,
+    StreamService,
+)
 from app.services.summary_service import SummaryService
 from app.workers.queue import enqueue_summary
 
@@ -27,6 +35,13 @@ logger = logging.getLogger(__name__)
 TITLE_MAX_LENGTH = 30
 
 EXCLUDED_STATUSES = ("failed", "interrupted")
+
+HEARTBEAT_INTERVAL_SECONDS = 5
+STREAM_INIT_WAIT_SECONDS = 10
+
+
+class _StreamAbandoned(Exception):
+    """无订阅者超过宽限期，主动放弃生成。"""
 
 
 class ChatService:
@@ -37,12 +52,6 @@ class ChatService:
         self.session_factory = session_factory or AsyncSessionLocal
         self.llm = LLMService()
         self.cache = CacheService()
-
-    async def _set_request_status(self, request_id: str, status: str) -> None:
-        redis = get_redis()
-        await redis.set(
-            f"chat:request:{request_id}", status, ex=settings.REDIS_REQUEST_TTL
-        )
 
     # ---- 纯函数 ----
     @staticmethod
@@ -229,7 +238,6 @@ class ChatService:
     async def _persist_final_turn(
         self,
         *,
-        request_id: str,
         conversation_id: int,
         user_message_id: int,
         user_raw_tokens: int,
@@ -238,7 +246,7 @@ class ChatService:
         error_code: str | None,
         already_persisted: bool,
     ) -> None:
-        """失败/断线收尾：写 assistant 占位并整轮移出上下文（幂等、免疫取消）。"""
+        """失败/中断收尾：写 assistant 占位并整轮移出上下文（幂等、免疫取消）。"""
         if already_persisted:
             return
         with anyio.CancelScope(shield=True):
@@ -262,105 +270,221 @@ class ChatService:
                     await session.commit()
                 await self._refresh_session_cache(conversation_id)
                 await self.cache.invalidate_conversation(conversation_id)
-                await self._set_request_status(request_id, status)
             except Exception:
                 logger.warning(
                     "收尾落库失败 conversation_id=%s", conversation_id, exc_info=True
                 )
 
-    # ---- 主流程 ----
-    async def stream_chat(
-        self, *, conversation_id: int, user_message: str
-    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
-        request_id = f"req_{uuid.uuid4().hex[:12]}"
-        await self._set_request_status(request_id, "pending")
+    # ---- 生产端（独立任务，不随连接取消）----
+    async def _generate(
+        self,
+        stream: StreamService,
+        request_id: str,
+        conversation_id: int,
+        assistant_parts: list[str],
+    ) -> tuple[str, dict[str, Any] | None]:
+        await self._ensure_session(conversation_id)
+        summary, watermark = await self._maybe_compress_context(conversation_id)
 
-        user_raw_tokens = count_tokens(user_message)
-        user_message_id = await self._persist_user_turn(
-            conversation_id, user_message, user_raw_tokens
-        )
+        session_messages = await self.cache.get_session_messages(conversation_id)
+        recent = [
+            message
+            for message in self._filter_context(session_messages)
+            if int(message.get("id") or 0) > watermark
+        ]
+        prompt = self._build_prompt(recent, summary)
 
-        yield "start", {"request_id": request_id, "user_message_id": user_message_id}
-
-        assistant_parts: list[str] = []
         final_finish = "stop"
         final_usage: dict[str, Any] | None = None
-        persisted = False
+        buffer: list[str] = []
+        buffered_chars = 0
+        last_flush = time.monotonic()
+        last_touch = time.monotonic()
+        zero_readers_since: float | None = None
 
+        async for chunk in self.llm.stream_chat(prompt):
+            if chunk.kind == "delta" and chunk.text:
+                assistant_parts.append(chunk.text)
+                buffer.append(chunk.text)
+                buffered_chars += len(chunk.text)
+                now = time.monotonic()
+                elapsed_ms = (now - last_flush) * 1000
+                if (
+                    buffered_chars >= settings.SSE_BATCH_MIN_CHARS
+                    or elapsed_ms >= settings.SSE_BATCH_MAX_INTERVAL_MS
+                ):
+                    await stream.publish(
+                        request_id, "delta", {"content": "".join(buffer)}
+                    )
+                    buffer.clear()
+                    buffered_chars = 0
+                    last_flush = now
+
+                if now - last_touch >= HEARTBEAT_INTERVAL_SECONDS:
+                    await stream.touch(request_id)
+                    last_touch = now
+
+                if settings.CHAT_STREAM_ABANDON_TIMEOUT > 0:
+                    if await stream.reader_count(request_id) == 0:
+                        zero_readers_since = zero_readers_since or now
+                        if (
+                            now - zero_readers_since
+                            > settings.CHAT_STREAM_ABANDON_TIMEOUT
+                        ):
+                            raise _StreamAbandoned()
+                    else:
+                        zero_readers_since = None
+            elif chunk.kind == "final":
+                final_finish = chunk.finish_reason or "stop"
+                final_usage = chunk.usage
+
+        if buffer:
+            await stream.publish(request_id, "delta", {"content": "".join(buffer)})
+
+        return final_finish, final_usage
+
+    async def _finalize_failed(
+        self,
+        stream: StreamService,
+        request_id: str,
+        conversation_id: int,
+        user_message_id: int | None,
+        user_raw_tokens: int,
+        assistant_parts: list[str],
+        status: str,
+        error_code: str | None,
+        persisted: bool,
+    ) -> None:
+        if user_message_id is not None:
+            await self._persist_final_turn(
+                conversation_id=conversation_id,
+                user_message_id=user_message_id,
+                user_raw_tokens=user_raw_tokens,
+                assistant_content="".join(assistant_parts),
+                status=status,
+                error_code=error_code,
+                already_persisted=persisted,
+            )
         try:
-            await self._ensure_session(conversation_id)
-            summary, watermark = await self._maybe_compress_context(conversation_id)
+            await stream.set_status(request_id, STATUS_FAILED)
+            await stream.publish(
+                request_id,
+                "error",
+                {
+                    "code": error_code or "INTERRUPTED",
+                    "message": "生成已中断" if status == "interrupted" else "聊天处理失败",
+                },
+            )
+        except Exception:
+            logger.warning("写入流失败状态出错 request_id=%s", request_id, exc_info=True)
 
-            session_messages = await self.cache.get_session_messages(conversation_id)
-            recent = [
-                message
-                for message in self._filter_context(session_messages)
-                if int(message.get("id") or 0) > watermark
-            ]
-            prompt = self._build_prompt(recent, summary)
+    async def run_generation(
+        self,
+        *,
+        request_id: str,
+        conversation_id: int,
+        user_id: int,
+        user_message: str,
+    ) -> None:
+        """生产端：生成并写入 Redis Stream（由独立任务运行，不随连接取消）。"""
+        stream = StreamService()
+        user_raw_tokens = count_tokens(user_message)
+        assistant_parts: list[str] = []
+        user_message_id: int | None = None
+        persisted = False
+        try:
+            user_message_id = await self._persist_user_turn(
+                conversation_id, user_message, user_raw_tokens
+            )
+            await stream.publish(
+                request_id,
+                "start",
+                {"request_id": request_id, "user_message_id": user_message_id},
+            )
 
-            await self._set_request_status(request_id, "streaming")
-
-            buffer: list[str] = []
-            buffered_chars = 0
-            last_flush = time.monotonic()
-            async for chunk in self.llm.stream_chat(prompt):
-                if chunk.kind == "delta" and chunk.text:
-                    assistant_parts.append(chunk.text)
-                    buffer.append(chunk.text)
-                    buffered_chars += len(chunk.text)
-                    now = time.monotonic()
-                    elapsed_ms = (now - last_flush) * 1000
-                    if (
-                        buffered_chars >= settings.SSE_BATCH_MIN_CHARS
-                        or elapsed_ms >= settings.SSE_BATCH_MAX_INTERVAL_MS
-                    ):
-                        yield "delta", {"content": "".join(buffer)}
-                        buffer.clear()
-                        buffered_chars = 0
-                        last_flush = now
-                elif chunk.kind == "final":
-                    final_finish = chunk.finish_reason or "stop"
-                    final_usage = chunk.usage
-
-            if buffer:
-                yield "delta", {"content": "".join(buffer)}
+            final_finish, final_usage = await self._generate(
+                stream, request_id, conversation_id, assistant_parts
+            )
 
             content = "".join(assistant_parts)
             assistant_id, token_count = await self._persist_assistant_turn(
                 conversation_id, content, final_usage
             )
             persisted = True
-            await self._set_request_status(request_id, "completed")
-
-            yield "done", {
-                "assistant_message_id": assistant_id,
-                "token_count": token_count,
-                "finish_reason": final_finish,
-            }
-        except (asyncio.CancelledError, GeneratorExit):
-            logger.info("客户端断开，收尾中断轮次 conversation_id=%s", conversation_id)
-            await self._persist_final_turn(
-                request_id=request_id,
-                conversation_id=conversation_id,
-                user_message_id=user_message_id,
-                user_raw_tokens=user_raw_tokens,
-                assistant_content="".join(assistant_parts),
-                status="interrupted",
-                error_code=None,
-                already_persisted=persisted,
+            await stream.set_status(request_id, STATUS_COMPLETED)
+            await stream.publish(
+                request_id,
+                "done",
+                {
+                    "assistant_message_id": assistant_id,
+                    "token_count": token_count,
+                    "finish_reason": final_finish,
+                },
+            )
+        except _StreamAbandoned:
+            logger.info("无订阅者超时，放弃生成 request_id=%s", request_id)
+            await self._finalize_failed(
+                stream, request_id, conversation_id, user_message_id,
+                user_raw_tokens, assistant_parts, "interrupted", None, persisted,
+            )
+        except asyncio.CancelledError:
+            logger.info("生成任务被取消 request_id=%s", request_id)
+            await self._finalize_failed(
+                stream, request_id, conversation_id, user_message_id,
+                user_raw_tokens, assistant_parts, "interrupted", None, persisted,
             )
             raise
         except Exception as exc:
-            logger.exception("聊天处理失败 request_id=%s", request_id)
-            await self._persist_final_turn(
-                request_id=request_id,
-                conversation_id=conversation_id,
-                user_message_id=user_message_id,
-                user_raw_tokens=user_raw_tokens,
-                assistant_content="".join(assistant_parts),
-                status="failed",
-                error_code=getattr(exc, "code", "INTERNAL_ERROR"),
-                already_persisted=persisted,
+            logger.exception("聊天生成失败 request_id=%s", request_id)
+            await self._finalize_failed(
+                stream, request_id, conversation_id, user_message_id,
+                user_raw_tokens, assistant_parts, "failed",
+                getattr(exc, "code", "INTERNAL_ERROR"), persisted,
             )
-            raise
+
+    # ---- 消费端 ----
+    async def iter_stream(
+        self, request_id: str, last_id: str | None = None
+    ) -> AsyncIterator[tuple[str, dict[str, Any], str | None]]:
+        """消费 Redis Stream，产出 (event, data, event_id)，支持从 last_id 续读。"""
+        stream = StreamService()
+        cursor = last_id or "0-0"
+        poll = max(settings.CHAT_STREAM_POLL_MS, 10) / 1000
+        init_deadline = time.monotonic() + STREAM_INIT_WAIT_SECONDS
+
+        while True:
+            entries = await stream.read_after(request_id, cursor)
+            for entry_id, event, data in entries:
+                cursor = entry_id
+                yield event, data, entry_id
+
+            meta = await stream.get_meta(request_id)
+            status = meta.get("status")
+
+            if status in TERMINAL_STATUSES:
+                for entry_id, event, data in await stream.read_after(request_id, cursor):
+                    cursor = entry_id
+                    yield event, data, entry_id
+                break
+
+            if status is None:
+                if time.monotonic() > init_deadline:
+                    yield (
+                        "error",
+                        {"code": "STREAM_NOT_FOUND", "message": "聊天流不存在或已过期"},
+                        None,
+                    )
+                    break
+                await asyncio.sleep(poll)
+                continue
+
+            if not entries and StreamService.is_stale(meta):
+                yield (
+                    "error",
+                    {"code": "STREAM_STALE", "message": "生成状态已失效，请重试"},
+                    None,
+                )
+                break
+
+            if not entries:
+                await asyncio.sleep(poll)

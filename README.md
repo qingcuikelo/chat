@@ -82,5 +82,6 @@ tests/                 # Pytest 测试
 - `GET/POST /api/v1/conversations`
 - `GET /api/v1/conversations/{id}/messages`
 - `POST /api/v1/chat`（SSE 流式）
+- `GET /api/v1/chat/stream/{request_id}`（SSE 断点续传，重连时带 `Last-Event-ID`）
 
-> 除注册、登录、刷新外，均需请求头 `Authorization: Bearer <access_token>`。
+> 公开接口：注册、登录、刷新令牌、邮箱验证与重发验证；其余需请求头 `Authorization: Bearer <access_token>`。
