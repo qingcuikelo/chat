@@ -101,9 +101,7 @@ async def test_consistent_header_forces_primary(two_dbs, monkeypatch):
     assert await _titles(request) == ["primary"]
 
 
-async def test_recent_write_sticky_forces_primary(
-    two_dbs, monkeypatch, fake_redis
-):
+async def test_recent_write_sticky_forces_primary(two_dbs, monkeypatch, fake_redis):
     primary_factory, replica_factory = two_dbs
     monkeypatch.setattr(database, "AsyncSessionLocal", primary_factory)
     monkeypatch.setattr(database, "AsyncReadSessionLocal", replica_factory)
@@ -122,9 +120,7 @@ async def test_recent_write_sticky_forces_primary(
     assert "replica" not in await _titles(request)
 
 
-async def test_conversation_list_uses_read_dependency(
-    client, auth_headers, monkeypatch
-):
+async def test_conversation_list_uses_read_dependency(client, auth_headers, monkeypatch):
     me = (await client.get(f"{API}/users/me", headers=auth_headers)).json()
     replica_engine, replica_factory = await _make_factory()
     async with replica_factory() as session:

@@ -45,18 +45,12 @@ async def test_verify_email_is_idempotent(client):
     user_id = registered.json()["id"]
     token = create_email_verification_token(user_id, "alice@example.com")
 
-    assert (
-        await client.post(f"{API}/auth/verify-email", json={"token": token})
-    ).status_code == 200
-    assert (
-        await client.post(f"{API}/auth/verify-email", json={"token": token})
-    ).status_code == 200
+    assert (await client.post(f"{API}/auth/verify-email", json={"token": token})).status_code == 200
+    assert (await client.post(f"{API}/auth/verify-email", json={"token": token})).status_code == 200
 
 
 async def test_verify_email_rejects_invalid_token(client):
-    response = await client.post(
-        f"{API}/auth/verify-email", json={"token": "not-a-token"}
-    )
+    response = await client.post(f"{API}/auth/verify-email", json={"token": "not-a-token"})
     assert response.status_code == 400
     assert response.json()["detail"]["code"] == "INVALID_REQUEST"
 
@@ -128,8 +122,6 @@ async def test_verify_email_get_page_success(client):
 
 
 async def test_verify_email_get_page_invalid(client):
-    response = await client.get(
-        f"{API}/auth/verify-email", params={"token": "not-a-token"}
-    )
+    response = await client.get(f"{API}/auth/verify-email", params={"token": "not-a-token"})
     assert response.status_code == 400
     assert "邮箱验证失败" in response.text

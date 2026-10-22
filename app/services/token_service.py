@@ -38,9 +38,7 @@ class TokenService:
         try:
             return bool(await self.redis.exists(BLACKLIST_KEY.format(jti=jti)))
         except Exception:
-            logger.warning(
-                "读取 access 黑名单失败，fail-open 放行 jti=%s", jti, exc_info=True
-            )
+            logger.warning("读取 access 黑名单失败，fail-open 放行 jti=%s", jti, exc_info=True)
             return False
 
     # ---- refresh 白名单 ----
@@ -59,9 +57,7 @@ class TokenService:
         try:
             return bool(await self.redis.exists(REFRESH_KEY.format(jti=jti)))
         except Exception:
-            logger.warning(
-                "读取 refresh 白名单失败，fail-open 放行 jti=%s", jti, exc_info=True
-            )
+            logger.warning("读取 refresh 白名单失败，fail-open 放行 jti=%s", jti, exc_info=True)
             return None
 
     async def revoke_refresh(self, jti: str) -> None:

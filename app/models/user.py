@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import Boolean, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampTZ, utcnow
+
+if TYPE_CHECKING:
+    from app.models.conversation import Conversation
 
 
 class User(Base):
@@ -21,9 +25,7 @@ class User(Base):
     email_verified: Mapped[bool] = mapped_column(
         Boolean, default=False, server_default="0", nullable=False
     )
-    email_verified_at: Mapped[datetime | None] = mapped_column(
-        TimestampTZ, nullable=True
-    )
+    email_verified_at: Mapped[datetime | None] = mapped_column(TimestampTZ, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TimestampTZ, default=utcnow, server_default=func.now(), nullable=False
     )
@@ -35,6 +37,6 @@ class User(Base):
         nullable=False,
     )
 
-    conversations: Mapped[list["Conversation"]] = relationship(
+    conversations: Mapped[list[Conversation]] = relationship(
         "Conversation", back_populates="user", cascade="all, delete-orphan"
     )

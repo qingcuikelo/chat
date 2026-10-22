@@ -24,9 +24,7 @@ def _message_select(model):
 
 
 def _message_union():
-    return union_all(
-        _message_select(Message), _message_select(MessageArchive)
-    ).subquery()
+    return union_all(_message_select(Message), _message_select(MessageArchive)).subquery()
 
 
 def _to_message(row) -> Message:
@@ -124,9 +122,7 @@ class MessageRepository:
         """按时间正序返回 id 大于 after_id 的消息。"""
         result = await self.db.execute(
             select(Message)
-            .where(
-                Message.conversation_id == conversation_id, Message.id > after_id
-            )
+            .where(Message.conversation_id == conversation_id, Message.id > after_id)
             .order_by(Message.id.asc())
         )
         return list(result.scalars().all())
@@ -183,9 +179,7 @@ class MessageRepository:
         await self.db.delete(message)
         await self.db.flush()
 
-    async def exclude_from_context(
-        self, message_id: int, raw_token_count: int
-    ) -> None:
+    async def exclude_from_context(self, message_id: int, raw_token_count: int) -> None:
         """将消息移出上下文预算（token_count 归零，真实值存 metadata）。"""
         await self.db.execute(
             update(Message)
@@ -199,27 +193,17 @@ class MessageRepository:
 
     async def delete_by_conversation(self, conversation_id: int) -> None:
         """按会话批量删除热表与归档表消息（单条 DELETE，避免逐条加载）。"""
+        await self.db.execute(delete(Message).where(Message.conversation_id == conversation_id))
         await self.db.execute(
-            delete(Message).where(Message.conversation_id == conversation_id)
-        )
-        await self.db.execute(
-            delete(MessageArchive).where(
-                MessageArchive.conversation_id == conversation_id
-            )
+            delete(MessageArchive).where(MessageArchive.conversation_id == conversation_id)
         )
         await self.db.flush()
 
     async def delete_by_user(self, user_id: int) -> None:
         """按用户批量删除其所有会话下的热表与归档表消息。"""
-        conversation_ids = select(Conversation.id).where(
-            Conversation.user_id == user_id
-        )
+        conversation_ids = select(Conversation.id).where(Conversation.user_id == user_id)
+        await self.db.execute(delete(Message).where(Message.conversation_id.in_(conversation_ids)))
         await self.db.execute(
-            delete(Message).where(Message.conversation_id.in_(conversation_ids))
-        )
-        await self.db.execute(
-            delete(MessageArchive).where(
-                MessageArchive.conversation_id.in_(conversation_ids)
-            )
+            delete(MessageArchive).where(MessageArchive.conversation_id.in_(conversation_ids))
         )
         await self.db.flush()

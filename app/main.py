@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-import app.models  # noqa: F401  确保模型完成注册
+from app import models as _models  # noqa: F401  确保模型完成注册
 from app.api.v1.router import api_router
 from app.core import redis as redis_client
 from app.core.config import settings

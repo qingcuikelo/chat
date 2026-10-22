@@ -52,29 +52,17 @@ async def _archive(session_factory, monkeypatch, **kwargs) -> dict[str, int]:
     return await tasks.archive_messages(None, **kwargs)
 
 
-async def test_archive_moves_old_messages_in_batches(
-    session_factory, fake_redis, monkeypatch
-):
-    conversation_id = await _seed(session_factory, old=5, recent=2)
+async def test_archive_moves_old_messages_in_batches(session_factory, fake_redis, monkeypatch):
+    await _seed(session_factory, old=5, recent=2)
     monkeypatch.setattr(settings, "MESSAGE_ARCHIVE_ENABLED", True)
 
     result = await _archive(session_factory, monkeypatch, after_days=180, batch_size=2)
     assert result == {"archived": 5}
 
     async with session_factory() as session:
-        hot = list(
-            (
-                await session.execute(
-                    select(Message.id).order_by(Message.id)
-                )
-            ).scalars()
-        )
+        hot = list((await session.execute(select(Message.id).order_by(Message.id))).scalars())
         archived = list(
-            (
-                await session.execute(
-                    select(MessageArchive.id).order_by(MessageArchive.id)
-                )
-            ).scalars()
+            (await session.execute(select(MessageArchive.id).order_by(MessageArchive.id))).scalars()
         )
 
     assert hot == [200, 201]
@@ -117,24 +105,18 @@ async def test_archive_respects_lock(session_factory, fake_redis, monkeypatch):
     assert hot == 2
 
 
-async def test_repository_reads_union_of_hot_and_archive(
-    session_factory, fake_redis, monkeypatch
-):
+async def test_repository_reads_union_of_hot_and_archive(session_factory, fake_redis, monkeypatch):
     conversation_id = await _seed(session_factory, old=4, recent=2)
     monkeypatch.setattr(settings, "MESSAGE_ARCHIVE_ENABLED", True)
     await _archive(session_factory, monkeypatch, after_days=180, batch_size=10)
 
     async with session_factory() as session:
         repository = MessageRepository(session)
-        items, total = await repository.list_by_conversation(
-            conversation_id, page=1, page_size=3
-        )
+        items, total = await repository.list_by_conversation(conversation_id, page=1, page_size=3)
         assert total == 6
         assert [item.id for item in items] == [100, 101, 102]
 
-        page2, _ = await repository.list_by_conversation(
-            conversation_id, page=2, page_size=3
-        )
+        page2, _ = await repository.list_by_conversation(conversation_id, page=2, page_size=3)
         assert [item.id for item in page2] == [103, 200, 201]
 
         keyset = await repository.list_keyset_after(conversation_id, 101, 2)
@@ -146,9 +128,7 @@ async def test_repository_reads_union_of_hot_and_archive(
         assert await repository.max_id() == 201
 
 
-async def test_delete_by_conversation_clears_archive(
-    session_factory, fake_redis, monkeypatch
-):
+async def test_delete_by_conversation_clears_archive(session_factory, fake_redis, monkeypatch):
     conversation_id = await _seed(session_factory, old=3, recent=1)
     monkeypatch.setattr(settings, "MESSAGE_ARCHIVE_ENABLED", True)
     await _archive(session_factory, monkeypatch, after_days=180, batch_size=10)
@@ -159,17 +139,13 @@ async def test_delete_by_conversation_clears_archive(
         await session.commit()
 
         hot = await session.scalar(select(func.count()).select_from(Message))
-        archived = await session.scalar(
-            select(func.count()).select_from(MessageArchive)
-        )
+        archived = await session.scalar(select(func.count()).select_from(MessageArchive))
 
     assert hot == 0
     assert archived == 0
 
 
-async def test_delete_by_user_clears_archive(
-    session_factory, fake_redis, monkeypatch
-):
+async def test_delete_by_user_clears_archive(session_factory, fake_redis, monkeypatch):
     await _seed(session_factory, old=2, recent=1)
     monkeypatch.setattr(settings, "MESSAGE_ARCHIVE_ENABLED", True)
     await _archive(session_factory, monkeypatch, after_days=180, batch_size=10)
@@ -180,9 +156,7 @@ async def test_delete_by_user_clears_archive(
         await session.commit()
 
         hot = await session.scalar(select(func.count()).select_from(Message))
-        archived = await session.scalar(
-            select(func.count()).select_from(MessageArchive)
-        )
+        archived = await session.scalar(select(func.count()).select_from(MessageArchive))
 
     assert hot == 0
     assert archived == 0
@@ -207,9 +181,7 @@ async def test_max_id_considers_archive(session_factory, fake_redis, monkeypatch
         assert await repository.max_id() == 900
 
 
-async def test_message_id_allocator_seeds_from_archive(
-    session_factory, fake_redis, monkeypatch
-):
+async def test_message_id_allocator_seeds_from_archive(session_factory, fake_redis, monkeypatch):
     conversation_id = await _seed(session_factory, old=2, recent=1)
     async with session_factory() as session:
         session.add(

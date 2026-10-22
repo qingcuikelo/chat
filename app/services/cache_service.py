@@ -117,9 +117,7 @@ class CacheService:
                 CONVERSATION_KEY.format(conversation_id=conversation_id)
             )
         except Exception:
-            logger.warning(
-                "读取会话缓存失败 conversation_id=%s", conversation_id, exc_info=True
-            )
+            logger.warning("读取会话缓存失败 conversation_id=%s", conversation_id, exc_info=True)
             return None
         return conversation_from_cache(data) if data else None
 
@@ -130,19 +128,13 @@ class CacheService:
             if settings.REDIS_CACHE_TTL > 0:
                 await self.redis.expire(key, settings.REDIS_CACHE_TTL)
         except Exception:
-            logger.warning(
-                "写入会话缓存失败 conversation_id=%s", conversation.id, exc_info=True
-            )
+            logger.warning("写入会话缓存失败 conversation_id=%s", conversation.id, exc_info=True)
 
     async def invalidate_conversation(self, conversation_id: int) -> None:
         try:
-            await self.redis.delete(
-                CONVERSATION_KEY.format(conversation_id=conversation_id)
-            )
+            await self.redis.delete(CONVERSATION_KEY.format(conversation_id=conversation_id))
         except Exception:
-            logger.warning(
-                "失效会话缓存失败 conversation_id=%s", conversation_id, exc_info=True
-            )
+            logger.warning("失效会话缓存失败 conversation_id=%s", conversation_id, exc_info=True)
 
     # ---- 读写分离一致性标记 ----
     async def mark_conversation_write(self, conversation_id: int) -> None:
@@ -164,9 +156,7 @@ class CacheService:
     async def is_recently_written(self, conversation_id: int) -> bool:
         try:
             return bool(
-                await self.redis.exists(
-                    RECENT_WRITE_KEY.format(conversation_id=conversation_id)
-                )
+                await self.redis.exists(RECENT_WRITE_KEY.format(conversation_id=conversation_id))
             )
         except Exception:
             # Redis 不可用时宁可回退主库
@@ -200,9 +190,7 @@ class CacheService:
             pipe = self.redis.pipeline()
             pipe.delete(key)
             if messages:
-                pipe.rpush(
-                    key, *[json.dumps(m, ensure_ascii=False) for m in messages]
-                )
+                pipe.rpush(key, *[json.dumps(m, ensure_ascii=False) for m in messages])
                 if settings.REDIS_SESSION_TTL > 0:
                     pipe.expire(key, settings.REDIS_SESSION_TTL)
             await pipe.execute()
@@ -211,9 +199,7 @@ class CacheService:
                 "重建聊天会话缓存失败 conversation_id=%s", conversation_id, exc_info=True
             )
 
-    async def push_session_message(
-        self, conversation_id: int, message: dict[str, Any]
-    ) -> None:
+    async def push_session_message(self, conversation_id: int, message: dict[str, Any]) -> None:
         key = SESSION_KEY.format(conversation_id=conversation_id)
         try:
             pipe = self.redis.pipeline()
@@ -229,9 +215,7 @@ class CacheService:
 
     async def clear_session(self, conversation_id: int) -> None:
         try:
-            await self.redis.delete(
-                SESSION_KEY.format(conversation_id=conversation_id)
-            )
+            await self.redis.delete(SESSION_KEY.format(conversation_id=conversation_id))
         except Exception:
             logger.warning(
                 "清理聊天会话缓存失败 conversation_id=%s", conversation_id, exc_info=True

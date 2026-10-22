@@ -15,9 +15,7 @@ class ConversationRepository:
         self, user_id: int, *, page: int = 1, page_size: int = 20
     ) -> tuple[list[Conversation], int]:
         total = await self.db.scalar(
-            select(func.count())
-            .select_from(Conversation)
-            .where(Conversation.user_id == user_id)
+            select(func.count()).select_from(Conversation).where(Conversation.user_id == user_id)
         )
         result = await self.db.execute(
             select(Conversation)
@@ -28,9 +26,7 @@ class ConversationRepository:
         )
         return list(result.scalars().all()), int(total or 0)
 
-    async def get_for_user(
-        self, conversation_id: int, user_id: int
-    ) -> Conversation | None:
+    async def get_for_user(self, conversation_id: int, user_id: int) -> Conversation | None:
         result = await self.db.execute(
             select(Conversation).where(
                 Conversation.id == conversation_id, Conversation.user_id == user_id
@@ -61,9 +57,7 @@ class ConversationRepository:
         )
         await self.db.flush()
 
-    async def update_summary(
-        self, conversation_id: int, summary: str, watermark: int
-    ) -> None:
+    async def update_summary(self, conversation_id: int, summary: str, watermark: int) -> None:
         """乐观更新滚动摘要与水位线（仅在推进时写入）。"""
         await self.db.execute(
             update(Conversation)
@@ -83,13 +77,9 @@ class ConversationRepository:
         await self.db.flush()
 
     async def delete_by_id(self, conversation_id: int) -> None:
-        await self.db.execute(
-            delete(Conversation).where(Conversation.id == conversation_id)
-        )
+        await self.db.execute(delete(Conversation).where(Conversation.id == conversation_id))
         await self.db.flush()
 
     async def delete_by_user(self, user_id: int) -> None:
-        await self.db.execute(
-            delete(Conversation).where(Conversation.user_id == user_id)
-        )
+        await self.db.execute(delete(Conversation).where(Conversation.user_id == user_id))
         await self.db.flush()

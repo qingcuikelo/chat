@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import JSON, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampTZ, utcnow
+
+if TYPE_CHECKING:
+    from app.models.conversation import Conversation
 
 MESSAGE_ROLES = ("system", "user", "assistant")
 
@@ -36,10 +39,6 @@ class Message(Base):
     created_at: Mapped[datetime] = mapped_column(
         TimestampTZ, default=utcnow, server_default=func.now(), nullable=False
     )
-    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
-        "metadata", JSON, nullable=True
-    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
 
-    conversation: Mapped["Conversation"] = relationship(
-        "Conversation", back_populates="messages"
-    )
+    conversation: Mapped[Conversation] = relationship("Conversation", back_populates="messages")

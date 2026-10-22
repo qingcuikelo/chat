@@ -41,9 +41,7 @@ async def test_summary_task_enqueued(client, auth_headers, monkeypatch):
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
-    cid = (
-        await client.post(f"{API}/conversations", headers=auth_headers, json={})
-    ).json()["id"]
+    cid = (await client.post(f"{API}/conversations", headers=auth_headers, json={})).json()["id"]
     for text in ("第一句", "第二句", "第三句"):
         await _chat(client, auth_headers, cid, text)
 
@@ -61,9 +59,7 @@ async def test_worker_summarize_task(
         yield StreamChunk("final", finish_reason="stop")
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
-    cid = (
-        await client.post(f"{API}/conversations", headers=auth_headers, json={})
-    ).json()["id"]
+    cid = (await client.post(f"{API}/conversations", headers=auth_headers, json={})).json()["id"]
     for text in ("第一句", "第二句", "第三句"):
         await _chat(client, auth_headers, cid, text)
 

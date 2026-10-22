@@ -23,9 +23,7 @@ class UserRepository:
 
     async def get_by_username_or_email(self, identifier: str) -> User | None:
         result = await self.db.execute(
-            select(User).where(
-                (User.username == identifier) | (User.email == identifier)
-            )
+            select(User).where((User.username == identifier) | (User.email == identifier))
         )
         return result.scalar_one_or_none()
 

@@ -41,8 +41,7 @@ class SummaryService:
         excluded = {
             (m.metadata_ or {}).get("answer_to")
             for m in messages
-            if m.role == "assistant"
-            and (m.metadata_ or {}).get("status") in EXCLUDED_STATUSES
+            if m.role == "assistant" and (m.metadata_ or {}).get("status") in EXCLUDED_STATUSES
         }
         result: list[Message] = []
         for m in messages:
@@ -55,9 +54,7 @@ class SummaryService:
         return result
 
     @staticmethod
-    def _summary_messages(
-        previous: str | None, messages: list[Message]
-    ) -> list[dict[str, str]]:
+    def _summary_messages(previous: str | None, messages: list[Message]) -> list[dict[str, str]]:
         parts: list[str] = []
         if previous:
             parts.append(f"已有摘要：\n{previous}")
@@ -76,9 +73,7 @@ class SummaryService:
             + count_tokens(summary or "")
             + await self.messages.sum_tokens_after(conversation_id, watermark)
         )
-        threshold = (
-            settings.CHAT_CONTEXT_MAX_TOKENS * settings.CHAT_SUMMARY_TRIGGER_RATIO
-        )
+        threshold = settings.CHAT_CONTEXT_MAX_TOKENS * settings.CHAT_SUMMARY_TRIGGER_RATIO
         if used <= threshold:
             return False
         history = self._filter_db_messages(
@@ -106,14 +101,10 @@ class SummaryService:
                 return summary, watermark
 
             new_watermark = to_summarize[-1].id
-            await self.conversations.update_summary(
-                conversation_id, new_summary, new_watermark
-            )
+            await self.conversations.update_summary(conversation_id, new_summary, new_watermark)
             await self.db.commit()
             return new_summary, new_watermark
         except Exception:
-            logger.warning(
-                "生成会话摘要失败 conversation_id=%s", conversation_id, exc_info=True
-            )
+            logger.warning("生成会话摘要失败 conversation_id=%s", conversation_id, exc_info=True)
             await self.db.rollback()
             return summary, watermark

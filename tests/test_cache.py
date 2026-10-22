@@ -19,9 +19,7 @@ async def test_user_cache_written_and_invalidated(client, auth_headers, fake_red
     assert cached["username"] == "alice"
     assert "password_hash" not in cached
 
-    await client.patch(
-        f"{API}/users/me", headers=auth_headers, json={"username": "alice_new"}
-    )
+    await client.patch(f"{API}/users/me", headers=auth_headers, json={"username": "alice_new"})
     assert await fake_redis.hgetall(f"user:{user_id}") == {}
 
     await client.get(f"{API}/users/me", headers=auth_headers)
@@ -58,9 +56,7 @@ async def test_chat_session_cache(client, auth_headers, fake_redis, monkeypatch)
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
     conversation_id = (
-        await client.post(
-            f"{API}/conversations", headers=auth_headers, json={"title": "会话"}
-        )
+        await client.post(f"{API}/conversations", headers=auth_headers, json={"title": "会话"})
     ).json()["id"]
 
     await client.post(
@@ -94,9 +90,7 @@ async def test_clearing_session_on_conversation_delete(
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
     conversation_id = (
-        await client.post(
-            f"{API}/conversations", headers=auth_headers, json={"title": "临时"}
-        )
+        await client.post(f"{API}/conversations", headers=auth_headers, json={"title": "临时"})
     ).json()["id"]
     await client.post(
         f"{API}/chat",
@@ -119,9 +113,7 @@ async def test_chat_bumps_conversation_activity(
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
     conversation_id = (
-        await client.post(
-            f"{API}/conversations", headers=auth_headers, json={"title": "活跃度"}
-        )
+        await client.post(f"{API}/conversations", headers=auth_headers, json={"title": "活跃度"})
     ).json()["id"]
 
     await client.get(f"{API}/conversations/{conversation_id}", headers=auth_headers)
@@ -130,9 +122,7 @@ async def test_chat_bumps_conversation_activity(
     old = datetime(2000, 1, 1)
     async with session_factory() as session:
         await session.execute(
-            update(Conversation)
-            .where(Conversation.id == conversation_id)
-            .values(updated_at=old)
+            update(Conversation).where(Conversation.id == conversation_id).values(updated_at=old)
         )
         await session.commit()
 
@@ -157,14 +147,10 @@ async def test_active_conversation_sorted_first(client, auth_headers, monkeypatc
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
     first = (
-        await client.post(
-            f"{API}/conversations", headers=auth_headers, json={"title": "A"}
-        )
+        await client.post(f"{API}/conversations", headers=auth_headers, json={"title": "A"})
     ).json()["id"]
     second = (
-        await client.post(
-            f"{API}/conversations", headers=auth_headers, json={"title": "B"}
-        )
+        await client.post(f"{API}/conversations", headers=auth_headers, json={"title": "B"})
     ).json()["id"]
 
     await client.post(
@@ -173,8 +159,6 @@ async def test_active_conversation_sorted_first(client, auth_headers, monkeypatc
         json={"conversation_id": first, "message": "hi"},
     )
 
-    items = (await client.get(f"{API}/conversations", headers=auth_headers)).json()[
-        "items"
-    ]
+    items = (await client.get(f"{API}/conversations", headers=auth_headers)).json()["items"]
     assert items[0]["id"] == first
     assert items[1]["id"] == second

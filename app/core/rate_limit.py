@@ -37,7 +37,7 @@ def _get_script(redis):
     if script is None:
         script = redis.register_script(_SLIDING_WINDOW_LUA)
         try:
-            setattr(redis, "_sliding_window_script", script)
+            redis._sliding_window_script = script
         except Exception:
             pass
     return script
@@ -63,9 +63,9 @@ async def check_rate_limit(
         return
     try:
         allowed = await _allow_request(key, limit, window_seconds)
-    except Exception:
+    except Exception as exc:
         if settings.RATE_LIMIT_FAIL_MODE.lower() == "closed":
-            raise RateLimitedError(headers={"Retry-After": str(window_seconds)})
+            raise RateLimitedError(headers={"Retry-After": str(window_seconds)}) from exc
         logger.warning("限流依赖不可用，fail-open 放行 key=%s", key, exc_info=True)
         return
     if not allowed:

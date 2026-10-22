@@ -1,7 +1,5 @@
 """上下文滚动摘要测试。"""
 
-from sqlalchemy import select
-
 from app.core.config import settings
 from app.core.exceptions import LLMError
 from app.models.conversation import Conversation

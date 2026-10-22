@@ -48,9 +48,7 @@ class _StreamAbandoned(Exception):
 
 
 class ChatService:
-    def __init__(
-        self, session_factory: async_sessionmaker[AsyncSession] | None = None
-    ) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession] | None = None) -> None:
         # 流式路径与请求 session 解耦，使用独立短生命周期会话
         self.session_factory = session_factory or AsyncSessionLocal
         self.llm = LLMService()
@@ -168,9 +166,7 @@ class ChatService:
             if title:
                 conversation.title = title
 
-    async def _maybe_compress_context(
-        self, conversation_id: int
-    ) -> tuple[str | None, int]:
+    async def _maybe_compress_context(self, conversation_id: int) -> tuple[str | None, int]:
         """用量接近预算时触发滚动摘要；后台队列优先，失败/关闭时同步回退。"""
         async with self.session_factory() as session:
             service = SummaryService(session)
@@ -181,9 +177,7 @@ class ChatService:
 
             if settings.SUMMARY_QUEUE_ENABLED:
                 try:
-                    if await service.should_compress(
-                        conversation_id, summary, watermark
-                    ):
+                    if await service.should_compress(conversation_id, summary, watermark):
                         await enqueue_summary(conversation_id)
                 except Exception:
                     logger.warning(
@@ -278,9 +272,7 @@ class ChatService:
             await session.commit()
             assistant_id = assistant_msg.id
 
-        await self._cache_success_turn(
-            conversation_id, assistant_id, assistant_content
-        )
+        await self._cache_success_turn(conversation_id, assistant_id, assistant_content)
         return assistant_id, token_count
 
     async def _persist_final_turn(
@@ -366,17 +358,13 @@ class ChatService:
                     )
                     conversations = ConversationRepository(session)
                     await conversations.touch(conversation_id)
-                    await self._maybe_set_title(
-                        conversations, conversation_id, user_message
-                    )
+                    await self._maybe_set_title(conversations, conversation_id, user_message)
                     await session.commit()
                 await self._refresh_session_cache(conversation_id)
                 await self.cache.invalidate_conversation(conversation_id)
                 await self.cache.mark_conversation_write(conversation_id)
             except Exception:
-                logger.warning(
-                    "收尾落库失败 conversation_id=%s", conversation_id, exc_info=True
-                )
+                logger.warning("收尾落库失败 conversation_id=%s", conversation_id, exc_info=True)
 
     # ---- 生产端（独立任务，不随连接取消）----
     async def _generate(
@@ -416,9 +404,7 @@ class ChatService:
                     buffered_chars >= settings.SSE_BATCH_MIN_CHARS
                     or elapsed_ms >= settings.SSE_BATCH_MAX_INTERVAL_MS
                 ):
-                    await stream.publish(
-                        request_id, "delta", {"content": "".join(buffer)}
-                    )
+                    await stream.publish(request_id, "delta", {"content": "".join(buffer)})
                     buffer.clear()
                     buffered_chars = 0
                     last_flush = now
@@ -430,10 +416,7 @@ class ChatService:
                 if settings.CHAT_STREAM_ABANDON_TIMEOUT > 0:
                     if await stream.reader_count(request_id) == 0:
                         zero_readers_since = zero_readers_since or now
-                        if (
-                            now - zero_readers_since
-                            > settings.CHAT_STREAM_ABANDON_TIMEOUT
-                        ):
+                        if now - zero_readers_since > settings.CHAT_STREAM_ABANDON_TIMEOUT:
                             raise _StreamAbandoned()
                     else:
                         zero_readers_since = None
@@ -550,24 +533,48 @@ class ChatService:
         except _StreamAbandoned:
             logger.info("无订阅者超时，放弃生成 request_id=%s", request_id)
             await self._finalize_failed(
-                stream, request_id, conversation_id, user_id, user_message_id,
-                user_message, user_raw_tokens, assistant_parts, "interrupted",
-                None, persisted,
+                stream,
+                request_id,
+                conversation_id,
+                user_id,
+                user_message_id,
+                user_message,
+                user_raw_tokens,
+                assistant_parts,
+                "interrupted",
+                None,
+                persisted,
             )
         except asyncio.CancelledError:
             logger.info("生成任务被取消 request_id=%s", request_id)
             await self._finalize_failed(
-                stream, request_id, conversation_id, user_id, user_message_id,
-                user_message, user_raw_tokens, assistant_parts, "interrupted",
-                None, persisted,
+                stream,
+                request_id,
+                conversation_id,
+                user_id,
+                user_message_id,
+                user_message,
+                user_raw_tokens,
+                assistant_parts,
+                "interrupted",
+                None,
+                persisted,
             )
             raise
         except Exception as exc:
             logger.exception("聊天生成失败 request_id=%s", request_id)
             await self._finalize_failed(
-                stream, request_id, conversation_id, user_id, user_message_id,
-                user_message, user_raw_tokens, assistant_parts, "failed",
-                getattr(exc, "code", "INTERNAL_ERROR"), persisted,
+                stream,
+                request_id,
+                conversation_id,
+                user_id,
+                user_message_id,
+                user_message,
+                user_raw_tokens,
+                assistant_parts,
+                "failed",
+                getattr(exc, "code", "INTERNAL_ERROR"),
+                persisted,
             )
 
     # ---- 消费端 ----

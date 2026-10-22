@@ -31,9 +31,7 @@ def parse_sse(text: str) -> list[tuple[str, dict | None]]:
 
 
 async def _new_conversation(client, headers) -> int:
-    response = await client.post(
-        f"{API}/conversations", headers=headers, json={"title": "聊天"}
-    )
+    response = await client.post(f"{API}/conversations", headers=headers, json={"title": "聊天"})
     return response.json()["id"]
 
 
@@ -65,12 +63,16 @@ async def test_chat_stream_success(client, auth_headers, monkeypatch, db_session
     assert "error" not in names
 
     rows = (
-        await db_session.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.id)
+        (
+            await db_session.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [row.role for row in rows] == ["user", "assistant"]
     assert rows[1].content == "你好，世界😊"
 
@@ -81,7 +83,7 @@ async def test_chat_stream_success(client, auth_headers, monkeypatch, db_session
 async def test_chat_llm_error(client, auth_headers, monkeypatch, db_session):
     async def failing_stream(self, messages):
         raise LLMError()
-        yield StreamChunk("delta", text="")  # noqa: unreachable  使其成为异步生成器
+        yield StreamChunk("delta", text="")  # unreachable，使其成为异步生成器
 
     monkeypatch.setattr(LLMService, "stream_chat", failing_stream)
 
@@ -94,12 +96,16 @@ async def test_chat_llm_error(client, auth_headers, monkeypatch, db_session):
     assert "done" not in [name for name, _ in events]
 
     rows = (
-        await db_session.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.id)
+        (
+            await db_session.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [row.role for row in rows] == ["user", "assistant"]
     assert rows[0].token_count == 0
     assert rows[1].token_count == 0
@@ -109,9 +115,7 @@ async def test_chat_llm_error(client, auth_headers, monkeypatch, db_session):
 
 
 async def test_chat_requires_token(client):
-    response = await client.post(
-        f"{API}/chat", json={"conversation_id": 1, "message": "hi"}
-    )
+    response = await client.post(f"{API}/chat", json={"conversation_id": 1, "message": "hi"})
     assert response.status_code == 401
 
 
@@ -236,14 +240,10 @@ async def test_delta_batching(client, auth_headers, monkeypatch):
     assert deltas == ["abcd", "ef"]
 
 
-async def test_finish_reason_and_usage_passthrough(
-    client, auth_headers, monkeypatch, db_session
-):
+async def test_finish_reason_and_usage_passthrough(client, auth_headers, monkeypatch, db_session):
     async def fake_stream(self, messages):
         yield StreamChunk("delta", text="部分")
-        yield StreamChunk(
-            "final", finish_reason="length", usage={"completion_tokens": 7}
-        )
+        yield StreamChunk("final", finish_reason="length", usage={"completion_tokens": 7})
 
     monkeypatch.setattr(LLMService, "stream_chat", fake_stream)
 
@@ -255,19 +255,23 @@ async def test_finish_reason_and_usage_passthrough(
     assert done["token_count"] == 7
 
     rows = (
-        await db_session.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(Message.id)
+        (
+            await db_session.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert rows[1].token_count == 7
 
 
 async def test_failed_turn_excluded_from_prompt(client, auth_headers, monkeypatch):
     async def failing_stream(self, messages):
         raise LLMError()
-        yield StreamChunk("delta", text="")  # noqa: unreachable
+        yield StreamChunk("delta", text="")  # unreachable
 
     monkeypatch.setattr(LLMService, "stream_chat", failing_stream)
     conversation_id = await _new_conversation(client, auth_headers)
@@ -286,9 +290,7 @@ async def test_failed_turn_excluded_from_prompt(client, auth_headers, monkeypatc
     joined = " ".join(message["content"] for message in captured["prompt"])
     assert "失败消息" not in joined
     user_messages = [
-        message["content"]
-        for message in captured["prompt"]
-        if message["role"] == "user"
+        message["content"] for message in captured["prompt"] if message["role"] == "user"
     ]
     assert user_messages == ["新消息"]
 
@@ -307,11 +309,7 @@ async def test_sse_events_have_stream_ids(client, auth_headers, monkeypatch):
         json={"conversation_id": conversation_id, "message": "hi"},
     )
     text = response.text.replace("\r\n", "\n")
-    ids = [
-        line[len("id:") :].strip()
-        for line in text.splitlines()
-        if line.startswith("id:")
-    ]
+    ids = [line[len("id:") :].strip() for line in text.splitlines() if line.startswith("id:")]
     assert len(ids) == 3
     assert all(ids)
     assert len(set(ids)) == 3
@@ -347,12 +345,16 @@ async def test_generation_cancel_persists_interrupted(
 
     async with session_factory() as session:
         rows = (
-            await session.execute(
-                select(Message)
-                .where(Message.conversation_id == conversation_id)
-                .order_by(Message.id)
+            (
+                await session.execute(
+                    select(Message)
+                    .where(Message.conversation_id == conversation_id)
+                    .order_by(Message.id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     assert [row.role for row in rows] == ["user", "assistant"]
     assert rows[0].token_count == 0

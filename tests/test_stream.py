@@ -27,9 +27,7 @@ async def test_iter_stream_full_and_resume(fake_redis):
 
     resumed = [
         (event, data)
-        async for event, data, _ in service.iter_stream(
-            request_id, last_id=first_delta_id
-        )
+        async for event, data, _ in service.iter_stream(request_id, last_id=first_delta_id)
     ]
     assert [event for event, _ in resumed] == ["delta", "done"]
     assert resumed[0][1]["content"] == "B"
@@ -40,9 +38,7 @@ async def test_iter_stream_stale_yields_error(fake_redis, monkeypatch):
     stream = StreamService()
     request_id = "req_stale_test"
     await stream.init(request_id, 1, 1)
-    await fake_redis.hset(
-        f"chat:stream:{request_id}:meta", "updated_at", "1"
-    )
+    await fake_redis.hset(f"chat:stream:{request_id}:meta", "updated_at", "1")
 
     service = ChatService()
     events = [(event, data) async for event, data, _ in service.iter_stream(request_id)]
@@ -51,9 +47,7 @@ async def test_iter_stream_stale_yields_error(fake_redis, monkeypatch):
 
 
 async def test_resume_endpoint_unknown_request(client, auth_headers):
-    response = await client.get(
-        f"{API}/chat/stream/req_does_not_exist", headers=auth_headers
-    )
+    response = await client.get(f"{API}/chat/stream/req_does_not_exist", headers=auth_headers)
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "STREAM_NOT_FOUND"
 

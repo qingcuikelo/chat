@@ -31,9 +31,7 @@ async def test_create_conversation(client, auth_headers):
 
 async def test_list_conversations_pagination(client, auth_headers):
     for index in range(3):
-        await client.post(
-            f"{API}/conversations", headers=auth_headers, json={"title": f"c{index}"}
-        )
+        await client.post(f"{API}/conversations", headers=auth_headers, json={"title": f"c{index}"})
 
     response = await client.get(
         f"{API}/conversations", headers=auth_headers, params={"page": 1, "page_size": 2}
@@ -52,9 +50,7 @@ async def test_get_conversation(client, auth_headers):
     )
     conversation_id = created.json()["id"]
 
-    response = await client.get(
-        f"{API}/conversations/{conversation_id}", headers=auth_headers
-    )
+    response = await client.get(f"{API}/conversations/{conversation_id}", headers=auth_headers)
     assert response.status_code == 200
     assert response.json()["id"] == conversation_id
 
@@ -67,9 +63,7 @@ async def test_cross_user_conversation_not_found(client, create_user_token):
     conversation_id = created.json()["id"]
 
     bob_headers = await create_user_token("bob", "bob@example.com")
-    response = await client.get(
-        f"{API}/conversations/{conversation_id}", headers=bob_headers
-    )
+    response = await client.get(f"{API}/conversations/{conversation_id}", headers=bob_headers)
     assert response.status_code == 404
     assert response.json()["detail"]["code"] == "CONVERSATION_NOT_FOUND"
 
@@ -95,14 +89,10 @@ async def test_delete_conversation(client, auth_headers):
     )
     conversation_id = created.json()["id"]
 
-    response = await client.delete(
-        f"{API}/conversations/{conversation_id}", headers=auth_headers
-    )
+    response = await client.delete(f"{API}/conversations/{conversation_id}", headers=auth_headers)
     assert response.status_code == 204
 
-    follow_up = await client.get(
-        f"{API}/conversations/{conversation_id}", headers=auth_headers
-    )
+    follow_up = await client.get(f"{API}/conversations/{conversation_id}", headers=auth_headers)
     assert follow_up.status_code == 404
 
 
@@ -123,9 +113,7 @@ async def test_list_messages_empty(client, auth_headers):
 
 
 async def test_messages_keyset_pagination(client, auth_headers, monkeypatch):
-    created = await client.post(
-        f"{API}/conversations", headers=auth_headers, json={}
-    )
+    created = await client.post(f"{API}/conversations", headers=auth_headers, json={})
     conversation_id = created.json()["id"]
     await _seed_chat(client, auth_headers, conversation_id, monkeypatch, rounds=3)
 

@@ -76,9 +76,7 @@ class StreamService:
 
     async def set_status(self, request_id: str, status: str) -> None:
         key = _meta_key(request_id)
-        await self.redis.hset(
-            key, mapping={"status": status, "updated_at": str(int(time.time()))}
-        )
+        await self.redis.hset(key, mapping={"status": status, "updated_at": str(int(time.time()))})
         await self.redis.expire(key, self.ttl)
 
     async def touch(self, request_id: str) -> None:
@@ -102,9 +100,7 @@ class StreamService:
         self, request_id: str, last_id: str = "0-0", count: int = 100
     ) -> list[tuple[str, str, dict[str, Any]]]:
         min_id = "-" if last_id in ("", "0-0") else last_id
-        entries = await self.redis.xrange(
-            _stream_key(request_id), min=min_id, max="+", count=count
-        )
+        entries = await self.redis.xrange(_stream_key(request_id), min=min_id, max="+", count=count)
         result: list[tuple[str, str, dict[str, Any]]] = []
         for entry_id, fields in entries:
             if last_id not in ("", "0-0") and not _id_gt(entry_id, last_id):

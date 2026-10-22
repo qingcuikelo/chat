@@ -1,7 +1,6 @@
 """测试夹具：隔离的内存 SQLite + 伪造 Redis + 桩 LLM。"""
 
 import fakeredis.aioredis
-import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

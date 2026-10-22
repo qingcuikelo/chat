@@ -15,9 +15,7 @@ API = "/api/v1"
 
 
 async def _new_conversation(client, headers) -> int:
-    response = await client.post(
-        f"{API}/conversations", headers=headers, json={}
-    )
+    response = await client.post(f"{API}/conversations", headers=headers, json={})
     return response.json()["id"]
 
 
@@ -64,9 +62,7 @@ async def test_queue_enabled_defers_then_consumer_persists(
 
     assert await _messages(session_factory, conversation_id) == []
 
-    written = await write_queue.consume_once(
-        "test", session_factory=session_factory
-    )
+    written = await write_queue.consume_once("test", session_factory=session_factory)
     assert written == 1
 
     rows = await _messages(session_factory, conversation_id)
@@ -107,7 +103,7 @@ async def test_queue_failure_turn_persists_placeholder(
 ):
     async def failing_stream(self, messages):
         raise LLMError()
-        yield StreamChunk("delta", text="")  # noqa: unreachable
+        yield StreamChunk("delta", text="")  # unreachable
 
     monkeypatch.setattr(settings, "WRITE_QUEUE_ENABLED", True)
     monkeypatch.setattr(LLMService, "stream_chat", failing_stream)
@@ -130,9 +126,7 @@ async def test_queue_failure_turn_persists_placeholder(
     assert rows[1].metadata_["answer_to"] == rows[0].id
 
 
-async def test_process_turns_batch_commits_once(
-    session_factory, fake_redis, db_engine
-):
+async def test_process_turns_batch_commits_once(session_factory, fake_redis, db_engine):
     async with session_factory() as session:
         conversation = Conversation(user_id=1, title=None)
         session.add(conversation)
@@ -206,14 +200,10 @@ async def test_process_turns_is_idempotent(session_factory, fake_redis):
     assert len(await _messages(session_factory, conversation_id)) == 2
 
 
-async def test_invalid_payload_goes_to_dead_letter(
-    session_factory, fake_redis
-):
+async def test_invalid_payload_goes_to_dead_letter(session_factory, fake_redis):
     await fake_redis.xadd(write_queue.STREAM_KEY, {"payload": "not-json"})
 
-    written = await write_queue.consume_once(
-        "test", session_factory=session_factory
-    )
+    written = await write_queue.consume_once("test", session_factory=session_factory)
 
     assert written == 0
     dead = await fake_redis.xrange(write_queue.DEAD_KEY)

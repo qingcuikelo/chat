@@ -3,7 +3,7 @@
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import Request
 from sqlalchemy import DateTime
@@ -26,7 +26,7 @@ TimestampTZ = DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql
 
 def utcnow() -> datetime:
     """UTC now（naive，含微秒），用于默认值与更新时间。"""
-    return datetime.now(timezone.utc).replace(tzinfo=None)
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 class Base(DeclarativeBase):
@@ -49,9 +49,7 @@ def _engine_options(url: str) -> dict:
     return options
 
 
-engine = create_async_engine(
-    settings.DATABASE_URL, **_engine_options(settings.DATABASE_URL)
-)
+engine = create_async_engine(settings.DATABASE_URL, **_engine_options(settings.DATABASE_URL))
 
 
 AsyncSessionLocal = async_sessionmaker(
@@ -65,9 +63,7 @@ AsyncSessionLocal = async_sessionmaker(
 read_engine: AsyncEngine | None = None
 AsyncReadSessionLocal: async_sessionmaker[AsyncSession] | None = None
 if settings.DB_REPLICA_ENABLED and settings.DB_READ_URL:
-    read_engine = create_async_engine(
-        settings.DB_READ_URL, **_engine_options(settings.DB_READ_URL)
-    )
+    read_engine = create_async_engine(settings.DB_READ_URL, **_engine_options(settings.DB_READ_URL))
     AsyncReadSessionLocal = async_sessionmaker(
         bind=read_engine,
         class_=AsyncSession,

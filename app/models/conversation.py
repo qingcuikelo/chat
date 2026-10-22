@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from sqlalchemy import ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampTZ, utcnow
+
+if TYPE_CHECKING:
+    from app.models.message import Message
+    from app.models.user import User
 
 
 class Conversation(Base):
@@ -23,9 +28,7 @@ class Conversation(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary_until_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -40,7 +43,7 @@ class Conversation(Base):
         nullable=False,
     )
 
-    user: Mapped["User"] = relationship("User", back_populates="conversations")
-    messages: Mapped[list["Message"]] = relationship(
+    user: Mapped[User] = relationship("User", back_populates="conversations")
+    messages: Mapped[list[Message]] = relationship(
         "Message", back_populates="conversation", cascade="all, delete-orphan"
     )

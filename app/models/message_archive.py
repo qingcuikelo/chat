@@ -30,6 +30,4 @@ class MessageArchive(Base):
     created_at: Mapped[datetime] = mapped_column(
         TimestampTZ, default=utcnow, server_default=func.now(), nullable=False
     )
-    metadata_: Mapped[dict[str, Any] | None] = mapped_column(
-        "metadata", JSON, nullable=True
-    )
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)

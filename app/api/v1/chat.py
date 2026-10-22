@@ -45,9 +45,7 @@ async def _sse_generator(
 ) -> AsyncIterator[dict[str, Any]]:
     await stream.reader_join(request_id)
     try:
-        async for event, data, event_id in service.iter_stream(
-            request_id, last_id=last_id
-        ):
+        async for event, data, event_id in service.iter_stream(request_id, last_id=last_id):
             payload: dict[str, Any] = {
                 "event": event,
                 "data": json.dumps(data, ensure_ascii=False),
@@ -58,9 +56,7 @@ async def _sse_generator(
     except AppError as exc:
         yield {
             "event": "error",
-            "data": json.dumps(
-                {"code": exc.code, "message": exc.message}, ensure_ascii=False
-            ),
+            "data": json.dumps({"code": exc.code, "message": exc.message}, ensure_ascii=False),
         }
     except Exception:
         logger.exception("聊天流消费异常 request_id=%s", request_id)
@@ -82,12 +78,8 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
 ) -> EventSourceResponse:
-    await check_rate_limit(
-        f"rate_limit:user:{current_user.id}", settings.RATE_LIMIT_PER_MINUTE
-    )
-    conversation = await ConversationService(db).get(
-        payload.conversation_id, current_user.id
-    )
+    await check_rate_limit(f"rate_limit:user:{current_user.id}", settings.RATE_LIMIT_PER_MINUTE)
+    conversation = await ConversationService(db).get(payload.conversation_id, current_user.id)
     conversation_id = conversation.id
     conversation_id_var.set(str(conversation_id))
     # 结束请求级事务，释放连接：流式期间改用独立短生命周期会话
@@ -127,9 +119,7 @@ async def resume_stream(
     if not meta or str(meta.get("user_id")) != str(current_user.id):
         raise StreamNotFoundError()
 
-    last_id = request.headers.get("Last-Event-ID") or request.query_params.get(
-        "last_event_id"
-    )
+    last_id = request.headers.get("Last-Event-ID") or request.query_params.get("last_event_id")
     service = ChatService(session_factory=session_factory)
     return EventSourceResponse(
         _sse_generator(service, request_id, last_id, stream),

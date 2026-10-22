@@ -2,9 +2,10 @@
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from openai import APIError, AsyncOpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from app.core.config import settings
 from app.core.exceptions import LLMError
@@ -57,12 +58,8 @@ class LLMService:
             except APIError as retry_exc:
                 raise LLMError() from retry_exc
 
-    async def stream_chat(
-        self, messages: list[dict[str, str]]
-    ) -> AsyncIterator[StreamChunk]:
-        stream = await self._open_stream(
-            messages, include_usage=settings.LLM_STREAM_INCLUDE_USAGE
-        )
+    async def stream_chat(self, messages: list[dict[str, str]]) -> AsyncIterator[StreamChunk]:
+        stream = await self._open_stream(messages, include_usage=settings.LLM_STREAM_INCLUDE_USAGE)
         finish_reason: str | None = None
         usage: dict[str, Any] | None = None
         try:
@@ -87,9 +84,7 @@ class LLMService:
         except APIError as exc:
             raise LLMError() from exc
 
-        yield StreamChunk(
-            "final", finish_reason=finish_reason or "stop", usage=usage
-        )
+        yield StreamChunk("final", finish_reason=finish_reason or "stop", usage=usage)
 
     async def complete(
         self,
@@ -104,7 +99,7 @@ class LLMService:
         try:
             response = await client.chat.completions.create(
                 model=model or settings.LLM_MODEL,
-                messages=messages,
+                messages=cast(list[ChatCompletionMessageParam], messages),
                 temperature=temperature,
                 max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
                 stream=False,

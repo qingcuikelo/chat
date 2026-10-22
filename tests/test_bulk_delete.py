@@ -42,9 +42,7 @@ async def test_delete_conversation_removes_messages(
     await _chat(client, auth_headers, conversation_id, monkeypatch)
     assert await _count_messages(session_factory, conversation_id) == 2
 
-    response = await client.delete(
-        f"{API}/conversations/{conversation_id}", headers=auth_headers
-    )
+    response = await client.delete(f"{API}/conversations/{conversation_id}", headers=auth_headers)
     assert response.status_code == 204
     assert await _count_messages(session_factory, conversation_id) == 0
 
@@ -61,9 +59,7 @@ async def test_delete_user_removes_conversations_and_messages(
     assert response.status_code == 204
 
     async with session_factory() as session:
-        conversations = await session.scalar(
-            select(func.count()).select_from(Conversation)
-        )
+        conversations = await session.scalar(select(func.count()).select_from(Conversation))
         messages = await session.scalar(select(func.count()).select_from(Message))
     assert conversations == 0
     assert messages == 0

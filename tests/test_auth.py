@@ -88,9 +88,7 @@ async def test_refresh_success(client, auth_headers):
     )
     refresh_token = login.json()["refresh_token"]
 
-    response = await client.post(
-        f"{API}/auth/refresh", json={"refresh_token": refresh_token}
-    )
+    response = await client.post(f"{API}/auth/refresh", json={"refresh_token": refresh_token})
     assert response.status_code == 200
     assert response.json()["access_token"]
 
@@ -102,9 +100,7 @@ async def test_refresh_rejects_access_token(client, auth_headers):
     )
     access_token = login.json()["access_token"]
 
-    response = await client.post(
-        f"{API}/auth/refresh", json={"refresh_token": access_token}
-    )
+    response = await client.post(f"{API}/auth/refresh", json={"refresh_token": access_token})
     assert response.status_code == 401
     assert response.json()["detail"]["code"] == "UNAUTHORIZED"
 
@@ -153,20 +149,14 @@ async def test_refresh_rotation_single_use(client, auth_headers):
     )
     first_refresh = login.json()["refresh_token"]
 
-    rotated = await client.post(
-        f"{API}/auth/refresh", json={"refresh_token": first_refresh}
-    )
+    rotated = await client.post(f"{API}/auth/refresh", json={"refresh_token": first_refresh})
     assert rotated.status_code == 200
     second_refresh = rotated.json()["refresh_token"]
 
-    reused = await client.post(
-        f"{API}/auth/refresh", json={"refresh_token": first_refresh}
-    )
+    reused = await client.post(f"{API}/auth/refresh", json={"refresh_token": first_refresh})
     assert reused.status_code == 401
 
-    again = await client.post(
-        f"{API}/auth/refresh", json={"refresh_token": second_refresh}
-    )
+    again = await client.post(f"{API}/auth/refresh", json={"refresh_token": second_refresh})
     assert again.status_code == 200
 
 

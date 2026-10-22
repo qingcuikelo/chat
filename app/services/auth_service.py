@@ -1,6 +1,7 @@
 """认证业务逻辑。"""
 
 import jwt
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import utcnow
@@ -26,7 +27,6 @@ from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
 from app.services.cache_service import CacheService
 from app.services.mail_service import dispatch_verification_email
 from app.services.token_service import TokenService
-from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AuthService:

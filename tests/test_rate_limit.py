@@ -29,9 +29,7 @@ async def test_rate_limit_fail_open(client, monkeypatch):
     monkeypatch.setattr(settings, "RATE_LIMIT_FAIL_MODE", "open")
 
     # 放行后走到鉴权逻辑，返回 401（而非 429/500）
-    response = await client.post(
-        f"{API}/auth/login", json={"username": "x", "password": "y"}
-    )
+    response = await client.post(f"{API}/auth/login", json={"username": "x", "password": "y"})
     assert response.status_code == 401
 
 
@@ -42,9 +40,7 @@ async def test_rate_limit_fail_closed(client, monkeypatch):
     monkeypatch.setattr(rate_limit, "_allow_request", boom)
     monkeypatch.setattr(settings, "RATE_LIMIT_FAIL_MODE", "closed")
 
-    response = await client.post(
-        f"{API}/auth/login", json={"username": "x", "password": "y"}
-    )
+    response = await client.post(f"{API}/auth/login", json={"username": "x", "password": "y"})
     assert response.status_code == 429
 
 

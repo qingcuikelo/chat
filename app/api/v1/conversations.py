@@ -36,7 +36,7 @@ async def list_conversations(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_read_db),
 ):
-    items, total = await ConversationService(db).list(
+    items, total = await ConversationService(db).list_conversations(
         current_user.id, page=page, page_size=page_size
     )
     return {"items": items, "total": total, "page": page, "page_size": page_size}
@@ -90,9 +90,7 @@ async def list_messages(
         order=order,
         cursor=cursor,
     )
-    next_cursor = (
-        items[-1].id if cursor is not None and len(items) == page_size else None
-    )
+    next_cursor = items[-1].id if cursor is not None and len(items) == page_size else None
     return {
         "items": items,
         "total": total,

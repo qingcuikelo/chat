@@ -50,9 +50,7 @@ async def summarize_conversation(ctx, conversation_id: int) -> None:
             await SummaryService(session).compress(conversation_id)
         await CacheService().invalidate_conversation(conversation_id)
     except Exception:
-        logger.warning(
-            "后台摘要任务失败 conversation_id=%s", conversation_id, exc_info=True
-        )
+        logger.warning("后台摘要任务失败 conversation_id=%s", conversation_id, exc_info=True)
     finally:
         try:
             await redis.delete(lock_key)
@@ -67,18 +65,14 @@ async def archive_messages(
     if not settings.MESSAGE_ARCHIVE_ENABLED:
         return {"archived": 0}
 
-    days = (
-        settings.MESSAGE_ARCHIVE_AFTER_DAYS if after_days is None else after_days
-    )
+    days = settings.MESSAGE_ARCHIVE_AFTER_DAYS if after_days is None else after_days
     size = settings.MESSAGE_ARCHIVE_BATCH_SIZE if batch_size is None else batch_size
     if days < 0 or size <= 0:
         return {"archived": 0}
 
     cutoff = utcnow() - timedelta(days=days)
     redis = get_redis()
-    acquired = await redis.set(
-        ARCHIVE_LOCK_KEY, "1", nx=True, ex=ARCHIVE_LOCK_TTL_SECONDS
-    )
+    acquired = await redis.set(ARCHIVE_LOCK_KEY, "1", nx=True, ex=ARCHIVE_LOCK_TTL_SECONDS)
     if not acquired:
         logger.info("归档任务已在运行，跳过本次执行")
         return {"archived": 0}
@@ -115,9 +109,7 @@ async def archive_messages(
                         ).where(Message.id.in_(ids)),
                     )
                 )
-                await session.execute(
-                    delete(Message).where(Message.id.in_(ids))
-                )
+                await session.execute(delete(Message).where(Message.id.in_(ids)))
                 await session.commit()
 
             total += len(ids)

@@ -16,9 +16,7 @@ async def test_message_create_does_not_refresh(session_factory, monkeypatch):
         user = await UserRepository(session).create(
             username="u1", email="u1@example.com", password_hash=hash_password("Passw0rd!")
         )
-        conversation = await ConversationRepository(session).create(
-            user_id=user.id, title="t"
-        )
+        conversation = await ConversationRepository(session).create(user_id=user.id, title="t")
         await session.commit()
 
         async def boom(*args, **kwargs):

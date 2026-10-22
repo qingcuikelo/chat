@@ -1,7 +1,7 @@
 """JWT 令牌签发 / 校验与密码哈希。"""
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import bcrypt
 import jwt
@@ -38,7 +38,7 @@ def verify_password(password: str, password_hash: str) -> bool:
 
 
 def _create_token(subject: int | str, token_type: str, expires_delta: timedelta) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(subject),
         "type": token_type,
@@ -50,27 +50,22 @@ def _create_token(subject: int | str, token_type: str, expires_delta: timedelta)
 
 
 def create_access_token(user_id: int | str) -> str:
-    return _create_token(
-        user_id, "access", timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
+    return _create_token(user_id, "access", timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
 
 
 def create_refresh_token(user_id: int | str) -> str:
-    return _create_token(
-        user_id, "refresh", timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
-    )
+    return _create_token(user_id, "refresh", timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
 
 
 def create_email_verification_token(user_id: int | str, email: str) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "type": "email_verify",
         "email": email,
         "jti": uuid.uuid4().hex,
         "iat": now,
-        "exp": now
-        + timedelta(minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES),
+        "exp": now + timedelta(minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES),
     }
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
@@ -84,4 +79,4 @@ def remaining_ttl(claims: dict) -> int:
     exp = claims.get("exp")
     if not exp:
         return 0
-    return max(0, int(exp) - int(datetime.now(timezone.utc).timestamp()))
+    return max(0, int(exp) - int(datetime.now(UTC).timestamp()))

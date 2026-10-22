@@ -16,7 +16,7 @@ import socket
 import time
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 from redis.exceptions import ResponseError
 from sqlalchemy import select
@@ -68,7 +68,7 @@ class WriteTurn:
         return payload
 
     @classmethod
-    def from_payload(cls, data: dict[str, Any]) -> "WriteTurn":
+    def from_payload(cls, data: dict[str, Any]) -> WriteTurn:
         raw_created_at = data.get("created_at")
         return cls(
             request_id=str(data["request_id"]),
@@ -84,9 +84,7 @@ class WriteTurn:
             error_code=data.get("error_code"),
             user_metadata=data.get("user_metadata"),
             assistant_metadata=data.get("assistant_metadata"),
-            created_at=(
-                datetime.fromisoformat(raw_created_at) if raw_created_at else None
-            ),
+            created_at=(datetime.fromisoformat(raw_created_at) if raw_created_at else None),
         )
 
 
@@ -122,9 +120,7 @@ async def enqueue_turn(turn: WriteTurn) -> bool:
 
 async def ensure_group() -> None:
     try:
-        await get_redis().xgroup_create(
-            STREAM_KEY, GROUP_NAME, id="0", mkstream=True
-        )
+        await get_redis().xgroup_create(STREAM_KEY, GROUP_NAME, id="0", mkstream=True)
     except ResponseError as exc:
         if "BUSYGROUP" not in str(exc):
             raise
@@ -140,9 +136,7 @@ async def read_batch(
     size = max(1, max_size if max_size is not None else settings.WRITE_QUEUE_BATCH_SIZE)
     wait_ms = max(
         0,
-        max_wait_ms
-        if max_wait_ms is not None
-        else settings.WRITE_QUEUE_BATCH_MAX_WAIT_MS,
+        max_wait_ms if max_wait_ms is not None else settings.WRITE_QUEUE_BATCH_MAX_WAIT_MS,
     )
     deadline = time.monotonic() + wait_ms / 1000
     entries: list[tuple[str, dict[str, str]]] = []
@@ -182,7 +176,7 @@ async def _clear_attempts(entry_ids: list[str]) -> None:
     if not entry_ids:
         return
     try:
-        await get_redis().hdel(ATTEMPTS_KEY, *entry_ids)
+        await cast(Any, get_redis().hdel(ATTEMPTS_KEY, *entry_ids))
     except Exception:
         pass
 
@@ -214,9 +208,7 @@ async def process_turns(
             conversation.id: conversation
             for conversation in (
                 await session.execute(
-                    select(Conversation).where(
-                        Conversation.id.in_(conversation_ids)
-                    )
+                    select(Conversation).where(Conversation.id.in_(conversation_ids))
                 )
             ).scalars()
         }
@@ -224,22 +216,14 @@ async def process_turns(
         if not valid:
             return 0
 
-        message_ids = [t.user_message_id for t in valid] + [
-            t.assistant_message_id for t in valid
-        ]
+        message_ids = [t.user_message_id for t in valid] + [t.assistant_message_id for t in valid]
         existing = set(
-            (
-                await session.execute(
-                    select(Message.id).where(Message.id.in_(message_ids))
-                )
-            ).scalars()
+            (await session.execute(select(Message.id).where(Message.id.in_(message_ids)))).scalars()
         )
         existing |= set(
             (
                 await session.execute(
-                    select(MessageArchive.id).where(
-                        MessageArchive.id.in_(message_ids)
-                    )
+                    select(MessageArchive.id).where(MessageArchive.id.in_(message_ids))
                 )
             ).scalars()
         )
@@ -283,9 +267,7 @@ async def process_turns(
 
         for conversation_id, conversation_turns in by_conversation.items():
             conversation = conversations[conversation_id]
-            latest = max(
-                (turn.created_at or utcnow()) for turn in conversation_turns
-            )
+            latest = max((turn.created_at or utcnow()) for turn in conversation_turns)
             if conversation.updated_at is None or latest > conversation.updated_at:
                 conversation.updated_at = latest
             if not conversation.title:
@@ -342,7 +324,7 @@ async def _fallback_individual(
                 exc_info=True,
             )
             try:
-                attempts = await redis.hincrby(ATTEMPTS_KEY, entry_id, 1)
+                attempts = await cast(Any, redis.hincrby(ATTEMPTS_KEY, entry_id, 1))
             except Exception:
                 attempts = 0
             if attempts >= settings.WRITE_QUEUE_MAX_ATTEMPTS:
@@ -367,18 +349,14 @@ async def handle_entries(
 
     parsed, invalid = await _parse_entries(entries)
     for entry_id, fields in invalid:
-        await _dead_letter(
-            entry_id, fields.get("payload") or "", "invalid_payload"
-        )
+        await _dead_letter(entry_id, fields.get("payload") or "", "invalid_payload")
         await _ack([entry_id])
 
     if not parsed:
         return 0
 
     try:
-        written = await process_turns(
-            [turn for _, turn in parsed], session_factory
-        )
+        written = await process_turns([turn for _, turn in parsed], session_factory)
     except Exception:
         logger.warning("写队列批量落库失败，改为逐条重试", exc_info=True)
         return await _fallback_individual(parsed, session_factory)
@@ -398,9 +376,7 @@ async def consume_once(
     """消费一批（测试/运维手动触发）。"""
     await ensure_group()
     entries = await read_batch(consumer, max_size=max_size, max_wait_ms=0)
-    return await handle_entries(
-        entries, consumer=consumer, session_factory=session_factory
-    )
+    return await handle_entries(entries, consumer=consumer, session_factory=session_factory)
 
 
 async def reclaim_pending(consumer: str) -> int:
@@ -427,9 +403,7 @@ async def run_consumer(stop_event: asyncio.Event) -> None:
     while not stop_event.is_set():
         try:
             await ensure_group()
-            await get_redis().set(
-                HEARTBEAT_KEY, "1", ex=HEARTBEAT_TTL_SECONDS
-            )
+            await get_redis().set(HEARTBEAT_KEY, "1", ex=HEARTBEAT_TTL_SECONDS)
             now = time.monotonic()
             if now - last_reclaim >= RECLAIM_INTERVAL_SECONDS:
                 await reclaim_pending(consumer)
@@ -453,9 +427,7 @@ _stop_event: asyncio.Event | None = None
 async def start_consumer() -> asyncio.Task:
     global _stop_event
     _stop_event = asyncio.Event()
-    return asyncio.create_task(
-        run_consumer(_stop_event), name="chat-write-consumer"
-    )
+    return asyncio.create_task(run_consumer(_stop_event), name="chat-write-consumer")
 
 
 async def stop_consumer(task: asyncio.Task | None) -> None:

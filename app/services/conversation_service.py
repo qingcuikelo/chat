@@ -21,19 +21,15 @@ class ConversationService:
         self.cache = CacheService()
 
     async def create(self, user_id: int, payload: ConversationCreate) -> Conversation:
-        conversation = await self.conversations.create(
-            user_id=user_id, title=payload.title
-        )
+        conversation = await self.conversations.create(user_id=user_id, title=payload.title)
         await self.db.commit()
         await self.cache.mark_conversation_write(conversation.id)
         return conversation
 
-    async def list(
+    async def list_conversations(
         self, user_id: int, *, page: int = 1, page_size: int = 20
     ) -> tuple[list[Conversation], int]:
-        return await self.conversations.list_by_user(
-            user_id, page=page, page_size=page_size
-        )
+        return await self.conversations.list_by_user(user_id, page=page, page_size=page_size)
 
     async def get(self, conversation_id: int, user_id: int) -> Conversation:
         """获取数据库中的会话（供需要变更的场景使用）。"""
@@ -54,9 +50,7 @@ class ConversationService:
         await self.cache.set_conversation(conversation)
         return conversation
 
-    async def update_title(
-        self, conversation_id: int, user_id: int, title: str
-    ) -> Conversation:
+    async def update_title(self, conversation_id: int, user_id: int, title: str) -> Conversation:
         conversation = await self.get(conversation_id, user_id)
         conversation = await self.conversations.update_title(conversation, title)
         await self.db.commit()
@@ -86,13 +80,9 @@ class ConversationService:
         await self.get(conversation_id, user_id)
         if cursor is not None:
             if order == "asc":
-                items = await self.messages.list_keyset_after(
-                    conversation_id, cursor, page_size
-                )
+                items = await self.messages.list_keyset_after(conversation_id, cursor, page_size)
             else:
-                items = await self.messages.list_keyset_before(
-                    conversation_id, cursor, page_size
-                )
+                items = await self.messages.list_keyset_before(conversation_id, cursor, page_size)
             total = await self.messages.count_by_conversation(conversation_id)
             return items, total
         return await self.messages.list_by_conversation(
