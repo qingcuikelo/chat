@@ -30,6 +30,21 @@ class Settings(BaseSettings):
     DB_MAX_OVERFLOW: int = 20
     DB_POOL_RECYCLE: int = 1800
     DB_POOL_TIMEOUT: int = 30
+    # ---- 只读从库（v3 WP8a，默认关闭）----
+    DB_READ_URL: str = ""
+    DB_REPLICA_ENABLED: bool = False
+    DB_REPLICA_STICKY_SECONDS: int = 5
+
+    # ---- 消息归档（v3 WP8b，默认关闭）----
+    MESSAGE_ARCHIVE_ENABLED: bool = False
+    MESSAGE_ARCHIVE_AFTER_DAYS: int = 180
+    MESSAGE_ARCHIVE_BATCH_SIZE: int = 1000
+
+    # ---- 写队列（v3 WP8c，默认关闭）----
+    WRITE_QUEUE_ENABLED: bool = False
+    WRITE_QUEUE_BATCH_SIZE: int = 64
+    WRITE_QUEUE_BATCH_MAX_WAIT_MS: int = 200
+    WRITE_QUEUE_MAX_ATTEMPTS: int = 5
 
     # ---- Redis ----
     REDIS_URL: str = "redis://localhost:6379/0"

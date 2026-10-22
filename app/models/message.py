@@ -22,6 +22,7 @@ class Message(Base):
             "id",
             "token_count",
         ),
+        Index("ix_messages_created_at_id", "created_at", "id"),
         {"mysql_charset": "utf8mb4", "mysql_collate": "utf8mb4_unicode_ci"},
     )
 

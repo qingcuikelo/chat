@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 SESSION_KEY = "chat:session:{conversation_id}"
 USER_KEY = "user:{user_id}"
 CONVERSATION_KEY = "conversation:{conversation_id}"
+RECENT_WRITE_KEY = "conv:recent_write:{conversation_id}"
 
 
 def _iso(value: datetime | None) -> str:
@@ -142,6 +143,34 @@ class CacheService:
             logger.warning(
                 "失效会话缓存失败 conversation_id=%s", conversation_id, exc_info=True
             )
+
+    # ---- 读写分离一致性标记 ----
+    async def mark_conversation_write(self, conversation_id: int) -> None:
+        """标记会话刚发生写入，短窗口内该会话的读取回退主库。"""
+        ttl = settings.DB_REPLICA_STICKY_SECONDS
+        if not settings.DB_REPLICA_ENABLED or ttl <= 0:
+            return
+        try:
+            await self.redis.set(
+                RECENT_WRITE_KEY.format(conversation_id=conversation_id), "1", ex=ttl
+            )
+        except Exception:
+            logger.warning(
+                "写入会话一致性标记失败 conversation_id=%s",
+                conversation_id,
+                exc_info=True,
+            )
+
+    async def is_recently_written(self, conversation_id: int) -> bool:
+        try:
+            return bool(
+                await self.redis.exists(
+                    RECENT_WRITE_KEY.format(conversation_id=conversation_id)
+                )
+            )
+        except Exception:
+            # Redis 不可用时宁可回退主库
+            return True
 
     # ---- 聊天会话上下文缓存 ----
     async def get_session_messages(self, conversation_id: int) -> list[dict[str, Any]]:

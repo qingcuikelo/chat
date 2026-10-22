@@ -25,6 +25,7 @@ class ConversationService:
             user_id=user_id, title=payload.title
         )
         await self.db.commit()
+        await self.cache.mark_conversation_write(conversation.id)
         return conversation
 
     async def list(
@@ -60,6 +61,7 @@ class ConversationService:
         conversation = await self.conversations.update_title(conversation, title)
         await self.db.commit()
         await self.cache.invalidate_conversation(conversation_id)
+        await self.cache.mark_conversation_write(conversation_id)
         return conversation
 
     async def delete(self, conversation_id: int, user_id: int) -> None:
@@ -69,6 +71,7 @@ class ConversationService:
         await self.db.commit()
         await self.cache.invalidate_conversation(conversation_id)
         await self.cache.clear_session(conversation_id)
+        await self.cache.mark_conversation_write(conversation_id)
 
     async def list_messages(
         self,

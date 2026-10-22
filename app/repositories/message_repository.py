@@ -2,11 +2,43 @@
 
 from typing import Any
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, insert, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.conversation import Conversation
 from app.models.message import Message
+from app.models.message_archive import MessageArchive
+
+
+def _message_select(model):
+    """选择消息列（统一 label，便于热表与归档表 union）。"""
+    return select(
+        model.id.label("id"),
+        model.conversation_id.label("conversation_id"),
+        model.role.label("role"),
+        model.content.label("content"),
+        model.token_count.label("token_count"),
+        model.created_at.label("created_at"),
+        model.metadata_.label("metadata_"),
+    )
+
+
+def _message_union():
+    return union_all(
+        _message_select(Message), _message_select(MessageArchive)
+    ).subquery()
+
+
+def _to_message(row) -> Message:
+    return Message(
+        id=row.id,
+        conversation_id=row.conversation_id,
+        role=row.role,
+        content=row.content,
+        token_count=row.token_count,
+        created_at=row.created_at,
+        metadata_=row.metadata_,
+    )
 
 
 class MessageRepository:
@@ -21,20 +53,17 @@ class MessageRepository:
         page_size: int = 50,
         order: str = "asc",
     ) -> tuple[list[Message], int]:
-        total = await self.db.scalar(
-            select(func.count())
-            .select_from(Message)
-            .where(Message.conversation_id == conversation_id)
-        )
-        order_by = Message.id.asc() if order == "asc" else Message.id.desc()
+        total = await self.count_by_conversation(conversation_id)
+        union = _message_union()
+        order_by = union.c.id.asc() if order == "asc" else union.c.id.desc()
         result = await self.db.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
+            select(union)
+            .where(union.c.conversation_id == conversation_id)
             .order_by(order_by)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
-        return list(result.scalars().all()), int(total or 0)
+        return [_to_message(row) for row in result.all()], total
 
     async def list_recent(self, conversation_id: int, limit: int) -> list[Message]:
         """按时间正序返回最近 limit 条消息。"""
@@ -47,40 +76,49 @@ class MessageRepository:
         return list(reversed(result.scalars().all()))
 
     async def count_by_conversation(self, conversation_id: int) -> int:
-        total = await self.db.scalar(
+        hot = await self.db.scalar(
             select(func.count())
             .select_from(Message)
             .where(Message.conversation_id == conversation_id)
         )
-        return int(total or 0)
+        archived = await self.db.scalar(
+            select(func.count())
+            .select_from(MessageArchive)
+            .where(MessageArchive.conversation_id == conversation_id)
+        )
+        return int(hot or 0) + int(archived or 0)
 
     async def list_keyset_after(
         self, conversation_id: int, after_id: int, limit: int
     ) -> list[Message]:
         """keyset 分页（正序）：返回 id 大于 after_id 的前 limit 条。"""
+        union = _message_union()
         result = await self.db.execute(
-            select(Message)
+            select(union)
             .where(
-                Message.conversation_id == conversation_id, Message.id > after_id
+                union.c.conversation_id == conversation_id,
+                union.c.id > after_id,
             )
-            .order_by(Message.id.asc())
+            .order_by(union.c.id.asc())
             .limit(limit)
         )
-        return list(result.scalars().all())
+        return [_to_message(row) for row in result.all()]
 
     async def list_keyset_before(
         self, conversation_id: int, before_id: int, limit: int
     ) -> list[Message]:
         """keyset 分页（倒序）：返回 id 小于 before_id 的前 limit 条。"""
+        union = _message_union()
         result = await self.db.execute(
-            select(Message)
+            select(union)
             .where(
-                Message.conversation_id == conversation_id, Message.id < before_id
+                union.c.conversation_id == conversation_id,
+                union.c.id < before_id,
             )
-            .order_by(Message.id.desc())
+            .order_by(union.c.id.desc())
             .limit(limit)
         )
-        return list(result.scalars().all())
+        return [_to_message(row) for row in result.all()]
 
     async def list_after(self, conversation_id: int, after_id: int) -> list[Message]:
         """按时间正序返回 id 大于 after_id 的消息。"""
@@ -106,8 +144,10 @@ class MessageRepository:
         return await self.db.get(Message, message_id)
 
     async def max_id(self) -> int:
-        value = await self.db.scalar(select(func.max(Message.id)))
-        return int(value or 0)
+        """返回热表与归档表的最大 ID，供 Redis 分配器重新播种。"""
+        hot = await self.db.scalar(select(func.max(Message.id)))
+        archived = await self.db.scalar(select(func.max(MessageArchive.id)))
+        return max(int(hot or 0), int(archived or 0))
 
     async def create(
         self,
@@ -132,6 +172,13 @@ class MessageRepository:
         await self.db.flush()
         return message
 
+    async def bulk_create(self, rows: list[dict[str, Any]]) -> None:
+        """批量插入消息（写队列消费端使用，单条 INSERT 多行）。"""
+        if not rows:
+            return
+        await self.db.execute(insert(Message), rows)
+        await self.db.flush()
+
     async def delete(self, message: Message) -> None:
         await self.db.delete(message)
         await self.db.flush()
@@ -151,18 +198,28 @@ class MessageRepository:
         await self.db.flush()
 
     async def delete_by_conversation(self, conversation_id: int) -> None:
-        """按会话批量删除消息（单条 DELETE，避免逐条加载）。"""
+        """按会话批量删除热表与归档表消息（单条 DELETE，避免逐条加载）。"""
         await self.db.execute(
             delete(Message).where(Message.conversation_id == conversation_id)
+        )
+        await self.db.execute(
+            delete(MessageArchive).where(
+                MessageArchive.conversation_id == conversation_id
+            )
         )
         await self.db.flush()
 
     async def delete_by_user(self, user_id: int) -> None:
-        """按用户批量删除其所有会话下的消息。"""
+        """按用户批量删除其所有会话下的热表与归档表消息。"""
         conversation_ids = select(Conversation.id).where(
             Conversation.user_id == user_id
         )
         await self.db.execute(
             delete(Message).where(Message.conversation_id.in_(conversation_ids))
+        )
+        await self.db.execute(
+            delete(MessageArchive).where(
+                MessageArchive.conversation_id.in_(conversation_ids)
+            )
         )
         await self.db.flush()

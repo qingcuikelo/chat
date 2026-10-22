@@ -14,7 +14,7 @@ import app.models  # noqa: F401  确保模型完成注册
 from app.api.v1.router import api_router
 from app.core import redis as redis_client
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import dispose_read_engine, engine
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIDMiddleware
@@ -30,6 +30,7 @@ async def lifespan(app: FastAPI):
     yield
     await close_pool()
     await redis_client.close_redis()
+    await dispose_read_engine()
     await engine.dispose()
 
 

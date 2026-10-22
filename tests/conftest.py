@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 import app.core.redis as redis_module
 import app.models  # noqa: F401  确保模型完成注册
-from app.core.database import Base, get_db, get_session_factory
+from app.core.database import Base, get_db, get_read_db, get_session_factory
 from app.core.security import create_email_verification_token
 from app.main import app
 
@@ -70,7 +70,16 @@ async def client(session_factory, fake_redis):
                 await session.rollback()
                 raise
 
+    async def override_get_read_db():
+        async with session_factory() as session:
+            try:
+                yield session
+            except Exception:
+                await session.rollback()
+                raise
+
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_read_db] = override_get_read_db
     app.dependency_overrides[get_session_factory] = lambda: session_factory
 
     transport = ASGITransport(app=app)

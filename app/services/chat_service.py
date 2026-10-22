@@ -14,8 +14,9 @@ import anyio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import settings
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, utcnow
 from app.core.redis import get_redis
+from app.core.text import generate_title
 from app.core.tokens import count_tokens
 from app.models.message import Message
 from app.repositories.conversation_repository import ConversationRepository
@@ -29,11 +30,10 @@ from app.services.stream_service import (
     StreamService,
 )
 from app.services.summary_service import SummaryService
+from app.services.write_queue import WriteTurn, enqueue_turn
 from app.workers.queue import enqueue_summary
 
 logger = logging.getLogger(__name__)
-
-TITLE_MAX_LENGTH = 30
 
 EXCLUDED_STATUSES = ("failed", "interrupted")
 
@@ -90,8 +90,7 @@ class ChatService:
 
     @staticmethod
     def _generate_title(text: str) -> str:
-        title = " ".join(text.split())
-        return title[:TITLE_MAX_LENGTH]
+        return generate_title(text)
 
     @staticmethod
     def _meta(message: Message) -> dict[str, Any]:
@@ -201,10 +200,31 @@ class ChatService:
         return new_summary, new_watermark
 
     # ---- 落库（单轮单次提交）----
+    async def _cache_success_turn(
+        self,
+        conversation_id: int,
+        assistant_message_id: int,
+        assistant_content: str,
+    ) -> None:
+        await self.cache.push_session_message(
+            conversation_id,
+            {
+                "id": assistant_message_id,
+                "role": "assistant",
+                "content": assistant_content,
+                "status": None,
+                "answer_to": None,
+            },
+        )
+        await self.cache.invalidate_conversation(conversation_id)
+        await self.cache.mark_conversation_write(conversation_id)
+
     async def _persist_success_turn(
         self,
         *,
+        request_id: str,
         conversation_id: int,
+        user_id: int,
         user_message_id: int,
         assistant_message_id: int,
         user_message: str,
@@ -213,6 +233,29 @@ class ChatService:
         usage: dict[str, Any] | None,
     ) -> tuple[int, int]:
         token_count = self._assistant_token_count(assistant_content, usage)
+
+        if settings.WRITE_QUEUE_ENABLED:
+            queued = await enqueue_turn(
+                WriteTurn(
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    user_id=user_id,
+                    user_message_id=user_message_id,
+                    assistant_message_id=assistant_message_id,
+                    user_content=user_message,
+                    assistant_content=assistant_content,
+                    user_token_count=user_raw_tokens,
+                    assistant_token_count=token_count,
+                    status="completed",
+                    created_at=utcnow(),
+                )
+            )
+            if queued:
+                await self._cache_success_turn(
+                    conversation_id, assistant_message_id, assistant_content
+                )
+                return assistant_message_id, token_count
+
         async with self.session_factory() as session:
             messages = MessageRepository(session)
             await messages.create(
@@ -235,23 +278,17 @@ class ChatService:
             await session.commit()
             assistant_id = assistant_msg.id
 
-        await self.cache.push_session_message(
-            conversation_id,
-            {
-                "id": assistant_id,
-                "role": "assistant",
-                "content": assistant_content,
-                "status": None,
-                "answer_to": None,
-            },
+        await self._cache_success_turn(
+            conversation_id, assistant_id, assistant_content
         )
-        await self.cache.invalidate_conversation(conversation_id)
         return assistant_id, token_count
 
     async def _persist_final_turn(
         self,
         *,
+        request_id: str,
         conversation_id: int,
+        user_id: int,
         user_message_id: int,
         user_message: str,
         user_raw_tokens: int,
@@ -266,6 +303,45 @@ class ChatService:
         with anyio.CancelScope(shield=True):
             try:
                 assistant_message_id = await self._allocate_message_id()
+
+                if settings.WRITE_QUEUE_ENABLED:
+                    queued = await enqueue_turn(
+                        WriteTurn(
+                            request_id=request_id,
+                            conversation_id=conversation_id,
+                            user_id=user_id,
+                            user_message_id=user_message_id,
+                            assistant_message_id=assistant_message_id,
+                            user_content=user_message,
+                            assistant_content=assistant_content,
+                            user_token_count=0,
+                            assistant_token_count=0,
+                            status=status,
+                            error_code=error_code,
+                            user_metadata={"raw_token_count": user_raw_tokens},
+                            assistant_metadata={
+                                "status": status,
+                                "error_code": error_code,
+                                "answer_to": user_message_id,
+                            },
+                            created_at=utcnow(),
+                        )
+                    )
+                    if queued:
+                        await self.cache.push_session_message(
+                            conversation_id,
+                            {
+                                "id": assistant_message_id,
+                                "role": "assistant",
+                                "content": assistant_content,
+                                "status": status,
+                                "answer_to": user_message_id,
+                            },
+                        )
+                        await self.cache.invalidate_conversation(conversation_id)
+                        await self.cache.mark_conversation_write(conversation_id)
+                        return
+
                 async with self.session_factory() as session:
                     messages = MessageRepository(session)
                     await messages.create(
@@ -296,6 +372,7 @@ class ChatService:
                     await session.commit()
                 await self._refresh_session_cache(conversation_id)
                 await self.cache.invalidate_conversation(conversation_id)
+                await self.cache.mark_conversation_write(conversation_id)
             except Exception:
                 logger.warning(
                     "收尾落库失败 conversation_id=%s", conversation_id, exc_info=True
@@ -374,6 +451,7 @@ class ChatService:
         stream: StreamService,
         request_id: str,
         conversation_id: int,
+        user_id: int,
         user_message_id: int | None,
         user_message: str,
         user_raw_tokens: int,
@@ -384,7 +462,9 @@ class ChatService:
     ) -> None:
         if user_message_id is not None:
             await self._persist_final_turn(
+                request_id=request_id,
                 conversation_id=conversation_id,
+                user_id=user_id,
                 user_message_id=user_message_id,
                 user_message=user_message,
                 user_raw_tokens=user_raw_tokens,
@@ -446,7 +526,9 @@ class ChatService:
             content = "".join(assistant_parts)
             assistant_message_id = await self._allocate_message_id()
             assistant_id, token_count = await self._persist_success_turn(
+                request_id=request_id,
                 conversation_id=conversation_id,
+                user_id=user_id,
                 user_message_id=user_message_id,
                 assistant_message_id=assistant_message_id,
                 user_message=user_message,
@@ -468,21 +550,23 @@ class ChatService:
         except _StreamAbandoned:
             logger.info("无订阅者超时，放弃生成 request_id=%s", request_id)
             await self._finalize_failed(
-                stream, request_id, conversation_id, user_message_id, user_message,
-                user_raw_tokens, assistant_parts, "interrupted", None, persisted,
+                stream, request_id, conversation_id, user_id, user_message_id,
+                user_message, user_raw_tokens, assistant_parts, "interrupted",
+                None, persisted,
             )
         except asyncio.CancelledError:
             logger.info("生成任务被取消 request_id=%s", request_id)
             await self._finalize_failed(
-                stream, request_id, conversation_id, user_message_id, user_message,
-                user_raw_tokens, assistant_parts, "interrupted", None, persisted,
+                stream, request_id, conversation_id, user_id, user_message_id,
+                user_message, user_raw_tokens, assistant_parts, "interrupted",
+                None, persisted,
             )
             raise
         except Exception as exc:
             logger.exception("聊天生成失败 request_id=%s", request_id)
             await self._finalize_failed(
-                stream, request_id, conversation_id, user_message_id, user_message,
-                user_raw_tokens, assistant_parts, "failed",
+                stream, request_id, conversation_id, user_id, user_message_id,
+                user_message, user_raw_tokens, assistant_parts, "failed",
                 getattr(exc, "code", "INTERNAL_ERROR"), persisted,
             )
 
