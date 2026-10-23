@@ -35,5 +35,7 @@ class WorkerSettings:
     max_jobs = 10
     job_timeout = 120
     keep_result = 0
+    health_check_key = "worker:heartbeat"
+    health_check_interval = 30
     on_startup = on_startup
     on_shutdown = on_shutdown
