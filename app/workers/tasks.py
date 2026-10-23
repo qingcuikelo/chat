@@ -38,6 +38,10 @@ async def send_verification_email(ctx, to_email: str, token: str) -> None:
     await MailService().send_verification_email(to_email, token)
 
 
+async def send_password_reset_email(ctx, to_email: str, token: str) -> None:
+    await MailService().send_password_reset_email(to_email, token)
+
+
 async def summarize_conversation(ctx, conversation_id: int) -> None:
     conversation_id_var.set(str(conversation_id))
     redis = get_redis()

@@ -7,17 +7,19 @@ from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 from app import models as _models  # noqa: F401  确保模型完成注册
 from app.api.v1.router import api_router
+from app.core import lifecycle
 from app.core import redis as redis_client
 from app.core.config import settings
 from app.core.database import dispose_read_engine, engine
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
-from app.core.middleware import RequestIDMiddleware
+from app.core.middleware import RequestIDMiddleware, SecurityHeadersMiddleware
 from app.core.redis import get_redis
 from app.workers.queue import close_pool
 
@@ -27,7 +29,12 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    lifecycle.reset_shutdown_state()
     yield
+    lifecycle.begin_shutdown()
+    cancelled = await lifecycle.drain_generations(settings.SHUTDOWN_DRAIN_SECONDS)
+    if cancelled:
+        logger.warning("停机时取消了 %s 个在途生成任务", cancelled)
     await close_pool()
     await redis_client.close_redis()
     await dispose_read_engine()
@@ -80,6 +87,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.allowed_hosts_list)
+    app.add_middleware(SecurityHeadersMiddleware)
     register_exception_handlers(app)
     app.add_middleware(RequestIDMiddleware)
     app.include_router(api_router, prefix=settings.API_V1_PREFIX)

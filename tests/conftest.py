@@ -25,6 +25,7 @@ async def _stub_enqueue_verification_email(monkeypatch):
     import app.workers.queue as queue_module
 
     monkeypatch.setattr(queue_module, "enqueue_verification_email", _noop)
+    monkeypatch.setattr(queue_module, "enqueue_password_reset_email", _noop)
 
 
 @pytest_asyncio.fixture

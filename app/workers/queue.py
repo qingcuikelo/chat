@@ -43,3 +43,8 @@ async def enqueue_summary(conversation_id: int) -> None:
 async def enqueue_verification_email(to_email: str, token: str) -> None:
     pool = await get_pool()
     await pool.enqueue_job("send_verification_email", to_email, token)
+
+
+async def enqueue_password_reset_email(to_email: str, token: str) -> None:
+    pool = await get_pool()
+    await pool.enqueue_job("send_password_reset_email", to_email, token)

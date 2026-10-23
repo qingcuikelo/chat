@@ -5,10 +5,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.config import settings
+
 
 class ChatRequest(BaseModel):
     conversation_id: int
-    message: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=settings.CHAT_MAX_MESSAGE_CHARS)
 
 
 class MessageRead(BaseModel):

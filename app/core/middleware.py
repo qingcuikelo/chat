@@ -1,9 +1,50 @@
-"""Request-ID 中间件（纯 ASGI，兼容 SSE 流式响应）。"""
+"""Request-ID / 安全响应头中间件（纯 ASGI，兼容 SSE 流式响应）。"""
 
 import uuid
 
 from app.core.config import settings
 from app.core.context import request_id_var
+
+SECURITY_HEADERS = (
+    ("X-Content-Type-Options", "nosniff"),
+    ("X-Frame-Options", "DENY"),
+    ("Referrer-Policy", "strict-origin-when-cross-origin"),
+    ("Permissions-Policy", "camera=(), microphone=(), geolocation=()"),
+    (
+        "Content-Security-Policy",
+        "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; "
+        "form-action 'self'; style-src 'unsafe-inline'",
+    ),
+)
+
+
+class SecurityHeadersMiddleware:
+    def __init__(self, app) -> None:
+        self.app = app
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers") or [])
+                existing = {name.lower() for name, _ in headers}
+                for name, value in SECURITY_HEADERS:
+                    if name.encode().lower() not in existing:
+                        headers.append((name.encode(), value.encode()))
+                if scope.get("scheme") == "https":
+                    headers.append(
+                        (
+                            b"Strict-Transport-Security",
+                            b"max-age=31536000; includeSubDomains",
+                        )
+                    )
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
 
 
 class RequestIDMiddleware:

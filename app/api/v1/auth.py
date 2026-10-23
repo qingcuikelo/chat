@@ -15,6 +15,8 @@ from app.models.user import User
 from app.schemas.auth import (
     LoginRequest,
     LogoutRequest,
+    PasswordForgotRequest,
+    PasswordResetRequest,
     RefreshRequest,
     RegisterRequest,
     ResendVerificationRequest,
@@ -81,7 +83,7 @@ async def login(
         f"rate_limit:login:ip:{get_client_ip(request)}",
         settings.RATE_LIMIT_LOGIN_IP_PER_MINUTE,
     )
-    return await AuthService(db).login(payload)
+    return await AuthService(db).login(payload, client_ip=get_client_ip(request))
 
 
 @router.post("/refresh", response_model=TokenPair)
@@ -112,6 +114,42 @@ async def logout(
     access_token = credentials.credentials if credentials else ""
     refresh_token = payload.refresh_token if payload else None
     await AuthService(db).logout(access_token, refresh_token)
+
+
+@router.post(
+    "/password/forgot",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def forgot_password(
+    payload: PasswordForgotRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    email = str(payload.email)
+    await check_rate_limit(
+        f"rate_limit:forgot:account:{email.lower()}",
+        settings.RATE_LIMIT_FORGOT_PER_MINUTE,
+    )
+    await check_rate_limit(
+        f"rate_limit:forgot:ip:{get_client_ip(request)}",
+        settings.RATE_LIMIT_FORGOT_IP_PER_MINUTE,
+    )
+    await AuthService(db).forgot_password(email)
+    return {"status": "accepted"}
+
+
+@router.post("/password/reset")
+async def reset_password(
+    payload: PasswordResetRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await check_rate_limit(
+        f"rate_limit:reset:ip:{get_client_ip(request)}",
+        settings.RATE_LIMIT_RESET_IP_PER_MINUTE,
+    )
+    await AuthService(db).reset_password(payload.token, payload.new_password)
+    return {"status": "ok"}
 
 
 @router.post("/verify-email")

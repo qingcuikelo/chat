@@ -87,6 +87,24 @@ class RateLimitedError(AppError):
     message = "请求过于频繁，请稍后再试"
 
 
+class AccountLockedError(AppError):
+    status_code = 429
+    code = "ACCOUNT_LOCKED"
+    message = "登录失败次数过多，账号已临时锁定"
+
+
+class PasswordResetInvalidError(AppError):
+    status_code = 400
+    code = "PASSWORD_RESET_INVALID"
+    message = "密码重置令牌无效或已使用"
+
+
+class ServerShuttingDownError(AppError):
+    status_code = 503
+    code = "SERVER_SHUTTING_DOWN"
+    message = "服务正在停机，请稍后重试"
+
+
 class LLMError(AppError):
     status_code = 502
     code = "LLM_ERROR"

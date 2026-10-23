@@ -1,6 +1,5 @@
 """聊天路由（SSE 流式 + Last-Event-ID 断点续传）。"""
 
-import asyncio
 import json
 import logging
 import uuid
@@ -11,10 +10,11 @@ from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
+from app.core import lifecycle
 from app.core.config import settings
 from app.core.context import conversation_id_var
 from app.core.database import get_db, get_session_factory
-from app.core.exceptions import AppError, StreamNotFoundError
+from app.core.exceptions import AppError, ServerShuttingDownError, StreamNotFoundError
 from app.core.rate_limit import check_rate_limit
 from app.dependencies.auth import get_current_user
 from app.models.user import User
@@ -26,15 +26,6 @@ from app.services.stream_service import StreamService
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["chat"])
-
-# 持有后台生成任务的强引用，避免被 GC；不随请求连接取消
-_background_tasks: set[asyncio.Task] = set()
-
-
-def _spawn_generation(coro) -> None:
-    task = asyncio.create_task(coro)
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
 
 
 async def _sse_generator(
@@ -78,6 +69,9 @@ async def chat(
     db: AsyncSession = Depends(get_db),
     session_factory: async_sessionmaker[AsyncSession] = Depends(get_session_factory),
 ) -> EventSourceResponse:
+    if lifecycle.is_shutting_down():
+        raise ServerShuttingDownError()
+
     await check_rate_limit(f"rate_limit:user:{current_user.id}", settings.RATE_LIMIT_PER_MINUTE)
     conversation = await ConversationService(db).get(payload.conversation_id, current_user.id)
     conversation_id = conversation.id
@@ -90,14 +84,18 @@ async def chat(
     await stream.init(request_id, current_user.id, conversation_id)
 
     service = ChatService(session_factory=session_factory)
-    _spawn_generation(
-        service.run_generation(
-            request_id=request_id,
-            conversation_id=conversation_id,
-            user_id=current_user.id,
-            user_message=payload.message,
+    try:
+        lifecycle.spawn_generation(
+            service.run_generation(
+                request_id=request_id,
+                conversation_id=conversation_id,
+                user_id=current_user.id,
+                user_message=payload.message,
+            ),
+            name=f"chat:{request_id}",
         )
-    )
+    except RuntimeError as exc:
+        raise ServerShuttingDownError() from exc
 
     return EventSourceResponse(
         _sse_generator(service, request_id, None, stream),

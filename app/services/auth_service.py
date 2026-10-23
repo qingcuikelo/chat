@@ -6,15 +6,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import utcnow
 from app.core.exceptions import (
+    AccountLockedError,
     ConflictError,
     EmailNotVerifiedError,
     InvalidCredentialsError,
     InvalidRequestError,
+    PasswordResetInvalidError,
     TokenExpiredError,
     UnauthorizedError,
 )
 from app.core.security import (
     create_access_token,
+    create_password_reset_token,
     create_refresh_token,
     decode_token,
     hash_password,
@@ -25,7 +28,10 @@ from app.models.user import User
 from app.repositories.user_repository import UserRepository
 from app.schemas.auth import LoginRequest, RegisterRequest, TokenPair
 from app.services.cache_service import CacheService
-from app.services.mail_service import dispatch_verification_email
+from app.services.mail_service import (
+    dispatch_password_reset_email,
+    dispatch_verification_email,
+)
 from app.services.token_service import TokenService
 
 
@@ -56,17 +62,78 @@ class AuthService:
             await dispatch_verification_email(user)
         return user
 
-    async def login(self, payload: LoginRequest) -> TokenPair:
+    async def login(self, payload: LoginRequest, *, client_ip: str = "") -> TokenPair:
         identifier = payload.username or payload.email
         if not identifier:
             raise InvalidCredentialsError("请提供用户名或邮箱")
 
+        identifier = identifier.strip()
+        lock_key = identifier.lower()
+        ip = (client_ip or "unknown").strip().lower()
+        await self._ensure_not_locked(lock_key, ip)
+
         user = await self.users.get_by_username_or_email(identifier)
         if user is None or not verify_password(payload.password, user.password_hash):
+            await self._register_login_failure(lock_key, ip)
             raise InvalidCredentialsError()
         if settings.EMAIL_VERIFICATION_REQUIRED and not user.email_verified:
             raise EmailNotVerifiedError()
+
+        await self.tokens.clear_login_failures(lock_key, ip)
         return await self._issue_tokens(user.id)
+
+    async def forgot_password(self, email: str) -> None:
+        """发送密码重置邮件；无论邮箱是否存在都保持同一响应。"""
+        user = await self.users.get_by_email(email)
+        if user is None:
+            return
+
+        token = create_password_reset_token(user.id)
+        claims = decode_token(token)
+        await self.tokens.store_password_reset(claims["jti"], user.id, remaining_ttl(claims))
+        await dispatch_password_reset_email(user, token)
+
+    async def reset_password(self, token: str, new_password: str) -> None:
+        try:
+            claims = decode_token(token)
+        except jwt.ExpiredSignatureError as exc:
+            raise PasswordResetInvalidError("重置链接已过期") from exc
+        except jwt.InvalidTokenError as exc:
+            raise PasswordResetInvalidError() from exc
+
+        if claims.get("type") != "password_reset" or not claims.get("jti"):
+            raise PasswordResetInvalidError()
+
+        user_id = await self.tokens.consume_password_reset(claims["jti"])
+        if user_id is None or str(user_id) != str(claims.get("sub")):
+            raise PasswordResetInvalidError()
+
+        user = await self.users.get(user_id)
+        if user is None:
+            raise PasswordResetInvalidError()
+
+        user.password_hash = hash_password(new_password)
+        await self.db.commit()
+        await self.cache.invalidate_user(user.id)
+        await self.tokens.revoke_user_refresh_tokens(user.id)
+
+    async def _ensure_not_locked(self, identifier: str, ip: str) -> None:
+        if settings.AUTH_LOCKOUT_THRESHOLD <= 0:
+            return
+        count = await self.tokens.login_failure_count(identifier, ip)
+        if count >= settings.AUTH_LOCKOUT_THRESHOLD:
+            raise AccountLockedError(
+                headers={"Retry-After": str(settings.AUTH_LOCKOUT_MINUTES * 60)}
+            )
+
+    async def _register_login_failure(self, identifier: str, ip: str) -> None:
+        if settings.AUTH_LOCKOUT_THRESHOLD <= 0:
+            return
+        count = await self.tokens.register_login_failure(identifier, ip)
+        if count >= settings.AUTH_LOCKOUT_THRESHOLD:
+            raise AccountLockedError(
+                headers={"Retry-After": str(settings.AUTH_LOCKOUT_MINUTES * 60)}
+            )
 
     async def verify_email(self, token: str) -> User:
         try:

@@ -7,6 +7,7 @@ from app.core.logging import setup_logging
 from app.workers.queue import redis_settings
 from app.workers.tasks import (
     archive_messages,
+    send_password_reset_email,
     send_verification_email,
     summarize_conversation,
 )
@@ -24,7 +25,11 @@ async def on_shutdown(ctx) -> None:
 
 
 class WorkerSettings:
-    functions = [summarize_conversation, send_verification_email]
+    functions = [
+        summarize_conversation,
+        send_verification_email,
+        send_password_reset_email,
+    ]
     cron_jobs = [cron(archive_messages, hour=3, minute=0, timeout=3600)]
     redis_settings = redis_settings()
     max_jobs = 10

@@ -1,8 +1,12 @@
 """应用配置，统一从环境变量 / `.env` 读取。"""
 
 from functools import lru_cache
+from typing import Self
 
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_JWT_SECRET = "change-me-to-a-random-32-byte-secret"
 
 
 class Settings(BaseSettings):
@@ -21,7 +25,10 @@ class Settings(BaseSettings):
     HOST: str = "127.0.0.1"
     PORT: int = 8000
     CORS_ORIGINS: str = "*"
+    ALLOWED_HOSTS: str = "*"
     REQUEST_ID_HEADER: str = "X-Request-ID"
+    SHUTDOWN_DRAIN_SECONDS: int = 30
+    CHAT_MAX_MESSAGE_CHARS: int = 8000
 
     # ---- 数据库 ----
     DATABASE_URL: str = "sqlite+aiosqlite:///./aichat.db"
@@ -55,11 +62,14 @@ class Settings(BaseSettings):
     REDIS_MAX_CONNECTIONS: int = 50
 
     # ---- 认证与安全 ----
-    JWT_SECRET_KEY: str = "change-me-to-a-random-32-byte-secret"
+    JWT_SECRET_KEY: str = DEFAULT_JWT_SECRET
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     PASSWORD_HASH_SCHEME: str = "bcrypt"
+    AUTH_LOCKOUT_THRESHOLD: int = 10
+    AUTH_LOCKOUT_MINUTES: int = 15
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = 30
     RATE_LIMIT_PER_MINUTE: int = 20
     RATE_LIMIT_LOGIN_PER_MINUTE: int = 5
     RATE_LIMIT_LOGIN_IP_PER_MINUTE: int = 30
@@ -73,6 +83,9 @@ class Settings(BaseSettings):
     RATE_LIMIT_RESEND_PER_MINUTE: int = 3
     RATE_LIMIT_RESEND_IP_PER_MINUTE: int = 10
     RATE_LIMIT_VERIFY_PER_MINUTE: int = 10
+    RATE_LIMIT_FORGOT_PER_MINUTE: int = 3
+    RATE_LIMIT_FORGOT_IP_PER_MINUTE: int = 10
+    RATE_LIMIT_RESET_IP_PER_MINUTE: int = 20
 
     # ---- 邮箱验证 ----
     EMAIL_VERIFICATION_REQUIRED: bool = True
@@ -146,6 +159,43 @@ class Settings(BaseSettings):
         if value == "*":
             return ["*"]
         return [origin.strip() for origin in value.split(",") if origin.strip()]
+
+    @property
+    def allowed_hosts_list(self) -> list[str]:
+        value = self.ALLOWED_HOSTS.strip()
+        if not value:
+            return ["*"]
+        return [host.strip() for host in value.split(",") if host.strip()]
+
+    @model_validator(mode="after")
+    def _validate_production(self) -> Self:
+        """生产环境启动期校验，避免默认密钥/不安全配置上线。"""
+        if self.APP_ENV.lower() != "production":
+            return self
+
+        problems: list[str] = []
+        if (
+            not self.JWT_SECRET_KEY
+            or self.JWT_SECRET_KEY == DEFAULT_JWT_SECRET
+            or len(self.JWT_SECRET_KEY) < 32
+        ):
+            problems.append("JWT_SECRET_KEY 必须为至少 32 位的随机值")
+        if self.DEBUG:
+            problems.append("DEBUG 必须为 false")
+        if not self.cors_origins_list or "*" in self.cors_origins_list:
+            problems.append("CORS_ORIGINS 不能为空或 *")
+        if "*" in self.allowed_hosts_list:
+            problems.append("ALLOWED_HOSTS 不能为 *")
+        if not self.LLM_API_KEY.strip() or self.LLM_API_KEY == "sk-your-key":
+            problems.append("LLM_API_KEY 不能为空")
+        if self.DATABASE_URL.startswith("sqlite"):
+            problems.append("生产环境不能使用 SQLite")
+        if self.DB_REPLICA_ENABLED and not self.DB_READ_URL.strip():
+            problems.append("DB_REPLICA_ENABLED=true 时必须配置 DB_READ_URL")
+
+        if problems:
+            raise ValueError("生产配置校验失败：" + "；".join(problems))
+        return self
 
 
 @lru_cache
