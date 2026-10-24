@@ -93,6 +93,12 @@ class AccountLockedError(AppError):
     message = "登录失败次数过多，账号已临时锁定"
 
 
+class QuotaExceededError(AppError):
+    status_code = 429
+    code = "QUOTA_EXCEEDED"
+    message = "今日 token 配额已用尽"
+
+
 class PasswordResetInvalidError(AppError):
     status_code = 400
     code = "PASSWORD_RESET_INVALID"

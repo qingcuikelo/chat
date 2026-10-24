@@ -15,7 +15,7 @@ import os
 import socket
 import time
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, cast
 
 from redis.exceptions import ResponseError
@@ -31,6 +31,7 @@ from app.models.message import Message
 from app.models.message_archive import MessageArchive
 from app.repositories.message_repository import MessageRepository
 from app.services.cache_service import CacheService
+from app.services.usage_service import UsageService
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,9 @@ class WriteTurn:
     assistant_content: str
     user_token_count: int
     assistant_token_count: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    usage_date: str | None = None
     status: str = "completed"
     error_code: str | None = None
     user_metadata: dict[str, Any] | None = None
@@ -80,6 +84,9 @@ class WriteTurn:
             assistant_content=data.get("assistant_content") or "",
             user_token_count=int(data.get("user_token_count") or 0),
             assistant_token_count=int(data.get("assistant_token_count") or 0),
+            prompt_tokens=int(data.get("prompt_tokens") or 0),
+            completion_tokens=int(data.get("completion_tokens") or 0),
+            usage_date=data.get("usage_date"),
             status=data.get("status") or "completed",
             error_code=data.get("error_code"),
             user_metadata=data.get("user_metadata"),
@@ -229,9 +236,11 @@ async def process_turns(
         )
 
         rows: list[dict[str, Any]] = []
+        usage_totals: dict[tuple[int, date], tuple[int, int, int]] = {}
         for turn in valid:
             created_at = turn.created_at or utcnow()
-            if turn.user_message_id not in existing:
+            user_new = turn.user_message_id not in existing
+            if user_new:
                 rows.append(
                     {
                         "id": turn.user_message_id,
@@ -244,7 +253,9 @@ async def process_turns(
                     }
                 )
                 existing.add(turn.user_message_id)
-            if turn.assistant_message_id not in existing:
+
+            assistant_new = turn.assistant_message_id not in existing
+            if assistant_new:
                 rows.append(
                     {
                         "id": turn.assistant_message_id,
@@ -258,8 +269,40 @@ async def process_turns(
                 )
                 existing.add(turn.assistant_message_id)
 
+            # 仅在整轮消息真正首次落库时计费，保证重试幂等
+            if user_new and assistant_new and turn.status == "completed":
+                try:
+                    usage_date = (
+                        date.fromisoformat(turn.usage_date)
+                        if turn.usage_date
+                        else created_at.date()
+                    )
+                except ValueError:
+                    usage_date = created_at.date()
+                key = (turn.user_id, usage_date)
+                current = usage_totals.get(key, (0, 0, 0))
+                usage_totals[key] = (
+                    current[0] + max(0, turn.prompt_tokens),
+                    current[1] + max(0, turn.completion_tokens),
+                    current[2] + 1,
+                )
+
         if rows:
             await MessageRepository(session).bulk_create(rows)
+
+        usage_service = UsageService(session)
+        for (user_id, usage_date), (
+            prompt_tokens,
+            completion_tokens,
+            count,
+        ) in usage_totals.items():
+            await usage_service.record_turn(
+                user_id=user_id,
+                usage_date=usage_date,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+                request_count=count,
+            )
 
         by_conversation: dict[int, list[WriteTurn]] = {}
         for turn in valid:
@@ -285,6 +328,10 @@ async def process_turns(
     cache = CacheService()
     for conversation_id in cache_ids:
         await cache.invalidate_conversation(conversation_id)
+
+    usage_service = UsageService()
+    for (user_id, usage_date), (prompt_tokens, completion_tokens, _) in usage_totals.items():
+        await usage_service.add_redis_tokens(user_id, usage_date, prompt_tokens + completion_tokens)
 
     return len(valid)
 

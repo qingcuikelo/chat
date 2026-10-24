@@ -11,6 +11,7 @@ from app.core.database import AsyncSessionLocal, utcnow
 from app.core.redis import get_redis
 from app.models.message import Message
 from app.models.message_archive import MessageArchive
+from app.models.usage import UsageDaily
 from app.services.cache_service import CacheService
 from app.services.mail_service import MailService
 from app.services.summary_service import SummaryService
@@ -131,3 +132,31 @@ async def archive_messages(
     if total:
         logger.info("消息归档完成 archived=%s cutoff=%s", total, cutoff)
     return {"archived": total}
+
+
+async def cleanup_usage(ctx=None, *, retention_days: int | None = None) -> dict[str, int]:
+    """按 USAGE_RETENTION_DAYS 清理过期 usage_daily（v3 WP6）。"""
+    days = settings.USAGE_RETENTION_DAYS if retention_days is None else retention_days
+    if days <= 0:
+        return {"deleted": 0}
+
+    cutoff = utcnow().date() - timedelta(days=days)
+    redis = get_redis()
+    acquired = await redis.set("lock:cleanup:usage", "1", nx=True, ex=3600)
+    if not acquired:
+        return {"deleted": 0}
+
+    try:
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(delete(UsageDaily).where(UsageDaily.usage_date < cutoff))
+            await session.commit()
+            deleted = int(getattr(result, "rowcount", 0) or 0)
+    finally:
+        try:
+            await redis.delete("lock:cleanup:usage")
+        except Exception:
+            pass
+
+    if deleted:
+        logger.info("用量清理完成 deleted=%s cutoff=%s", deleted, cutoff)
+    return {"deleted": deleted}

@@ -22,6 +22,7 @@ from app.schemas.chat import ChatRequest
 from app.services.chat_service import ChatService
 from app.services.conversation_service import ConversationService
 from app.services.stream_service import StreamService
+from app.services.usage_service import UsageService
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +73,7 @@ async def chat(
     if lifecycle.is_shutting_down():
         raise ServerShuttingDownError()
 
+    await UsageService(db).ensure_within_quota(current_user.id)
     await check_rate_limit(f"rate_limit:user:{current_user.id}", settings.RATE_LIMIT_PER_MINUTE)
     conversation = await ConversationService(db).get(payload.conversation_id, current_user.id)
     conversation_id = conversation.id

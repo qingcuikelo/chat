@@ -7,6 +7,7 @@ from app.core.logging import setup_logging
 from app.workers.queue import redis_settings
 from app.workers.tasks import (
     archive_messages,
+    cleanup_usage,
     send_password_reset_email,
     send_verification_email,
     summarize_conversation,
@@ -30,7 +31,10 @@ class WorkerSettings:
         send_verification_email,
         send_password_reset_email,
     ]
-    cron_jobs = [cron(archive_messages, hour=3, minute=0, timeout=3600)]
+    cron_jobs = [
+        cron(archive_messages, hour=3, minute=0, timeout=3600),
+        cron(cleanup_usage, hour=3, minute=30, timeout=600),
+    ]
     redis_settings = redis_settings()
     max_jobs = 10
     job_timeout = 120

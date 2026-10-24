@@ -30,6 +30,7 @@ from app.services.stream_service import (
     StreamService,
 )
 from app.services.summary_service import SummaryService
+from app.services.usage_service import UsageService
 from app.services.write_queue import WriteTurn, enqueue_turn
 from app.workers.queue import enqueue_summary
 
@@ -225,8 +226,10 @@ class ChatService:
         user_raw_tokens: int,
         assistant_content: str,
         usage: dict[str, Any] | None,
+        prompt_tokens: int,
     ) -> tuple[int, int]:
         token_count = self._assistant_token_count(assistant_content, usage)
+        usage_date = utcnow().date()
 
         if settings.WRITE_QUEUE_ENABLED:
             queued = await enqueue_turn(
@@ -241,6 +244,9 @@ class ChatService:
                     user_token_count=user_raw_tokens,
                     assistant_token_count=token_count,
                     status="completed",
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=token_count,
+                    usage_date=usage_date.isoformat(),
                     created_at=utcnow(),
                 )
             )
@@ -269,10 +275,17 @@ class ChatService:
             conversations = ConversationRepository(session)
             await conversations.touch(conversation_id)
             await self._maybe_set_title(conversations, conversation_id, user_message)
+            await UsageService(session).record_turn(
+                user_id=user_id,
+                usage_date=usage_date,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=token_count,
+            )
             await session.commit()
             assistant_id = assistant_msg.id
 
         await self._cache_success_turn(conversation_id, assistant_id, assistant_content)
+        await UsageService().add_redis_tokens(user_id, usage_date, prompt_tokens + token_count)
         return assistant_id, token_count
 
     async def _persist_final_turn(
@@ -373,7 +386,7 @@ class ChatService:
         request_id: str,
         conversation_id: int,
         assistant_parts: list[str],
-    ) -> tuple[str, dict[str, Any] | None]:
+    ) -> tuple[str, dict[str, Any] | None, int]:
         await self._ensure_session(conversation_id)
         summary, watermark = await self._maybe_compress_context(conversation_id)
 
@@ -427,7 +440,10 @@ class ChatService:
         if buffer:
             await stream.publish(request_id, "delta", {"content": "".join(buffer)})
 
-        return final_finish, final_usage
+        prompt_tokens = int((final_usage or {}).get("prompt_tokens") or 0)
+        if prompt_tokens <= 0:
+            prompt_tokens = sum(count_tokens(message.get("content", "")) for message in prompt)
+        return final_finish, final_usage, prompt_tokens
 
     async def _finalize_failed(
         self,
@@ -502,7 +518,7 @@ class ChatService:
                 {"request_id": request_id, "user_message_id": user_message_id},
             )
 
-            final_finish, final_usage = await self._generate(
+            final_finish, final_usage, prompt_tokens = await self._generate(
                 stream, request_id, conversation_id, assistant_parts
             )
 
@@ -518,6 +534,7 @@ class ChatService:
                 user_raw_tokens=user_raw_tokens,
                 assistant_content=content,
                 usage=final_usage,
+                prompt_tokens=prompt_tokens,
             )
             persisted = True
             await stream.set_status(request_id, STATUS_COMPLETED)

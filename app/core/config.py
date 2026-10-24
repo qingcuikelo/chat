@@ -145,6 +145,11 @@ class Settings(BaseSettings):
     CHAT_SUMMARY_KEEP_RECENT_MESSAGES: int = 20
     CHAT_SUMMARY_MAX_TOKENS: int = 2048
 
+    # ---- 用量与配额（v3 WP6）----
+    USER_DAILY_TOKEN_QUOTA: int = 0
+    QUOTA_ENFORCE: bool = False
+    USAGE_RETENTION_DAYS: int = 365
+
     # ---- 日志 ----
     LOG_LEVEL: str = "INFO"
     LOG_FORMAT: str = "text"
