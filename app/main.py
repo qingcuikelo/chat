@@ -8,6 +8,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
@@ -20,6 +21,7 @@ from app.core.database import dispose_read_engine, engine
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
 from app.core.middleware import RequestIDMiddleware, SecurityHeadersMiddleware
+from app.core.openapi import API_DESCRIPTION, TAGS_METADATA
 from app.core.redis import get_redis
 from app.workers.queue import close_pool
 
@@ -74,9 +76,39 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
 
+def _configure_openapi(app: FastAPI) -> None:
+    """移除框架默认 422，统一由 400 INVALID_REQUEST 响应参数校验错误。"""
+
+    def custom_openapi() -> dict:
+        if app.openapi_schema:
+            return app.openapi_schema
+
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+            tags=TAGS_METADATA,
+        )
+        for path_item in schema.get("paths", {}).values():
+            for operation in path_item.values():
+                if isinstance(operation, dict):
+                    operation.get("responses", {}).pop("422", None)
+        components = schema.get("components", {}).get("schemas", {})
+        components.pop("HTTPValidationError", None)
+        components.pop("ValidationError", None)
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = custom_openapi  # type: ignore[method-assign]
+
+
 def create_app() -> FastAPI:
     app = FastAPI(
         title=settings.APP_NAME,
+        version="0.3.0",
+        description=API_DESCRIPTION,
+        openapi_tags=TAGS_METADATA,
         debug=settings.DEBUG,
         lifespan=lifespan,
     )
@@ -125,6 +157,7 @@ def create_app() -> FastAPI:
             status_code=200, content={"status": "ok", "db": db_ok, "redis": redis_ok}
         )
 
+    _configure_openapi(app)
     return app
 
 

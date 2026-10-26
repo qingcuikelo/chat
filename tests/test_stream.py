@@ -46,6 +46,40 @@ async def test_iter_stream_stale_yields_error(fake_redis, monkeypatch):
     assert events[-1][1]["code"] == "STREAM_STALE"
 
 
+async def test_resume_endpoint_accepts_header_and_query_cursor(client, auth_headers):
+    me = (await client.get(f"{API}/users/me", headers=auth_headers)).json()
+    stream = StreamService()
+    request_id = "req_resume_endpoint_test"
+    await stream.init(request_id, me["id"], conversation_id=1)
+    await stream.publish(request_id, "start", {"request_id": request_id, "user_message_id": 1})
+    cursor = await stream.publish(request_id, "delta", {"content": "A"})
+    await stream.publish(request_id, "delta", {"content": "B"})
+    await stream.publish(
+        request_id,
+        "done",
+        {"assistant_message_id": 1, "token_count": 1, "finish_reason": "stop"},
+    )
+    await stream.set_status(request_id, "completed")
+
+    by_header = await client.get(
+        f"{API}/chat/stream/{request_id}",
+        headers={**auth_headers, "Last-Event-ID": cursor},
+    )
+    assert by_header.status_code == 200
+    assert "event: delta" in by_header.text
+    assert "event: done" in by_header.text
+    assert "event: start" not in by_header.text
+
+    by_query = await client.get(
+        f"{API}/chat/stream/{request_id}",
+        headers=auth_headers,
+        params={"last_event_id": cursor},
+    )
+    assert by_query.status_code == 200
+    assert "event: delta" in by_query.text
+    assert "event: done" in by_query.text
+
+
 async def test_resume_endpoint_unknown_request(client, auth_headers):
     response = await client.get(f"{API}/chat/stream/req_does_not_exist", headers=auth_headers)
     assert response.status_code == 404
