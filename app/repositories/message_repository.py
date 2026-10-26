@@ -63,6 +63,16 @@ class MessageRepository:
         )
         return [_to_message(row) for row in result.all()], total
 
+    async def list_all(self, conversation_id: int) -> list[Message]:
+        """按 id 升序返回会话全部消息（热表 + 归档表）。"""
+        union = _message_union()
+        result = await self.db.execute(
+            select(union)
+            .where(union.c.conversation_id == conversation_id)
+            .order_by(union.c.id.asc())
+        )
+        return [_to_message(row) for row in result.all()]
+
     async def list_recent(self, conversation_id: int, limit: int) -> list[Message]:
         """按时间正序返回最近 limit 条消息。"""
         result = await self.db.execute(

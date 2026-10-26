@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Integer, String, Text, func
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, Text, func, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base, TimestampTZ, utcnow
@@ -19,8 +19,10 @@ class Conversation(Base):
     __tablename__ = "conversation"
     __table_args__ = (
         Index(
-            "ix_conversation_user_id_updated_at_id",
+            "ix_conversation_user_id_is_archived_is_pinned_updated_at_id",
             "user_id",
+            "is_archived",
+            "is_pinned",
             "updated_at",
             "id",
         ),
@@ -30,6 +32,13 @@ class Conversation(Base):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_pinned: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    is_archived: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("0")
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(TimestampTZ, nullable=True)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     summary_until_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

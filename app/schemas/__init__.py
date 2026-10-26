@@ -16,6 +16,8 @@ from app.schemas.chat import (
 from app.schemas.common import Page
 from app.schemas.conversation import (
     ConversationCreate,
+    ConversationExport,
+    ConversationPage,
     ConversationRead,
     ConversationUpdate,
 )
@@ -32,6 +34,8 @@ __all__ = [
     "UserRead",
     "UserUpdate",
     "ConversationCreate",
+    "ConversationExport",
+    "ConversationPage",
     "ConversationRead",
     "ConversationUpdate",
     "ChatRequest",

@@ -1,6 +1,8 @@
 """会话数据访问层。"""
 
-from sqlalchemy import delete, func, or_, select, update
+from datetime import datetime
+
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import utcnow
@@ -12,18 +14,64 @@ class ConversationRepository:
         self.db = db
 
     async def list_by_user(
-        self, user_id: int, *, page: int = 1, page_size: int = 20
+        self,
+        user_id: int,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        q: str | None = None,
+        archived: bool = False,
+        cursor: tuple[bool, datetime, int] | None = None,
     ) -> tuple[list[Conversation], int]:
-        total = await self.db.scalar(
-            select(func.count()).select_from(Conversation).where(Conversation.user_id == user_id)
-        )
-        result = await self.db.execute(
+        filters = [
+            Conversation.user_id == user_id,
+            Conversation.is_archived == archived,
+        ]
+        if q:
+            filters.append(Conversation.title.contains(q, autoescape=True))
+
+        total = await self.db.scalar(select(func.count()).select_from(Conversation).where(*filters))
+        statement = (
             select(Conversation)
-            .where(Conversation.user_id == user_id)
-            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
+            .where(*filters)
+            .order_by(
+                Conversation.is_pinned.desc(),
+                Conversation.updated_at.desc(),
+                Conversation.id.desc(),
+            )
         )
+        if cursor is not None:
+            pinned, updated_at, last_id = cursor
+            if pinned:
+                after_position = or_(
+                    Conversation.is_pinned.is_(False),
+                    and_(
+                        Conversation.is_pinned.is_(True),
+                        or_(
+                            Conversation.updated_at < updated_at,
+                            and_(
+                                Conversation.updated_at == updated_at,
+                                Conversation.id < last_id,
+                            ),
+                        ),
+                    ),
+                )
+            else:
+                after_position = and_(
+                    Conversation.is_pinned.is_(False),
+                    or_(
+                        Conversation.updated_at < updated_at,
+                        and_(
+                            Conversation.updated_at == updated_at,
+                            Conversation.id < last_id,
+                        ),
+                    ),
+                )
+            statement = statement.where(after_position).limit(page_size + 1)
+        else:
+            statement = statement.offset((page - 1) * page_size).limit(page_size)
+
+        result = await self.db.execute(statement)
         return list(result.scalars().all()), int(total or 0)
 
     async def get_for_user(self, conversation_id: int, user_id: int) -> Conversation | None:
@@ -43,9 +91,34 @@ class ConversationRepository:
         await self.db.flush()
         return conversation
 
-    async def update_title(self, conversation: Conversation, title: str) -> Conversation:
-        conversation.title = title
+    async def update_fields(
+        self,
+        conversation: Conversation,
+        *,
+        title: str | None = None,
+        is_pinned: bool | None = None,
+        is_archived: bool | None = None,
+    ) -> Conversation:
+        values: dict[str, object] = {}
+        if title is not None:
+            values["title"] = title
+            values["updated_at"] = utcnow()
+        if is_pinned is not None:
+            values["is_pinned"] = is_pinned
+        if is_archived is not None:
+            if is_archived and not conversation.is_archived:
+                values["archived_at"] = utcnow()
+            elif not is_archived:
+                values["archived_at"] = None
+            values["is_archived"] = is_archived
+        if "updated_at" not in values:
+            values["updated_at"] = Conversation.updated_at
+
+        await self.db.execute(
+            update(Conversation).where(Conversation.id == conversation.id).values(**values)
+        )
         await self.db.flush()
+        await self.db.refresh(conversation)
         return conversation
 
     async def touch(self, conversation_id: int) -> None:

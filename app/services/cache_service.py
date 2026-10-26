@@ -63,6 +63,9 @@ def conversation_to_cache(conversation: Conversation) -> dict[str, str]:
         "id": str(conversation.id),
         "user_id": str(conversation.user_id),
         "title": conversation.title or "",
+        "is_pinned": "1" if conversation.is_pinned else "0",
+        "is_archived": "1" if conversation.is_archived else "0",
+        "archived_at": _iso(conversation.archived_at),
         "created_at": _iso(conversation.created_at),
         "updated_at": _iso(conversation.updated_at),
     }
@@ -73,6 +76,9 @@ def conversation_from_cache(data: dict[str, str]) -> Conversation:
         id=int(data["id"]),
         user_id=int(data["user_id"]),
         title=data.get("title") or None,
+        is_pinned=data.get("is_pinned") == "1",
+        is_archived=data.get("is_archived") == "1",
+        archived_at=_parse_dt(data.get("archived_at")),
         created_at=_parse_dt(data.get("created_at")),
         updated_at=_parse_dt(data.get("updated_at")),
     )

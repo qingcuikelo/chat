@@ -20,4 +20,5 @@ def test_messages_archive_indexes_registered():
 
 def test_conversation_composite_index_registered():
     names = {index.name for index in Conversation.__table__.indexes}
-    assert "ix_conversation_user_id_updated_at_id" in names
+    assert "ix_conversation_user_id_is_archived_is_pinned_updated_at_id" in names
+    assert "ix_conversation_user_id_updated_at_id" not in names
