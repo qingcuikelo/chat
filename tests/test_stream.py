@@ -2,7 +2,9 @@
 
 import asyncio
 from contextlib import suppress
+from types import SimpleNamespace
 
+import app.services.stream_service as stream_module
 from app.core.config import settings
 from app.services.chat_service import ChatService
 from app.services.stream_service import StreamService
@@ -57,6 +59,9 @@ async def test_iter_stream_drains_all_terminal_events(fake_redis):
 
 async def test_stream_heartbeat_prevents_false_stale(fake_redis, monkeypatch):
     monkeypatch.setattr(settings, "CHAT_STREAM_STALE_SECONDS", 1)
+    clock = SimpleNamespace(now=1_000_000.0)
+    monkeypatch.setattr(stream_module, "time", SimpleNamespace(time=lambda: clock.now))
+
     stream = StreamService()
     request_id = "req_heartbeat_test"
     await stream.init(request_id, 1, 1)
@@ -64,10 +69,19 @@ async def test_stream_heartbeat_prevents_false_stale(fake_redis, monkeypatch):
 
     task = asyncio.create_task(ChatService()._heartbeat(stream, request_id))
     try:
-        await asyncio.sleep(0.05)
-        meta = await stream.get_meta(request_id)
-        assert meta["updated_at"] != "1"
+        for _ in range(100):
+            meta = await stream.get_meta(request_id)
+            if meta["updated_at"] != "1":
+                break
+            await asyncio.sleep(0.01)
+        else:
+            raise AssertionError("heartbeat did not refresh stream metadata")
+
+        assert meta["updated_at"] == str(int(clock.now))
+        clock.now += 0.5
         assert not StreamService.is_stale(meta)
+        clock.now += 1.0
+        assert StreamService.is_stale(meta)
     finally:
         task.cancel()
         with suppress(asyncio.CancelledError):
