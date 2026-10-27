@@ -1,5 +1,8 @@
 """v2 WP4e 断点续传测试。"""
 
+import asyncio
+from contextlib import suppress
+
 from app.core.config import settings
 from app.services.chat_service import ChatService
 from app.services.stream_service import StreamService
@@ -31,6 +34,44 @@ async def test_iter_stream_full_and_resume(fake_redis):
     ]
     assert [event for event, _ in resumed] == ["delta", "done"]
     assert resumed[0][1]["content"] == "B"
+
+
+async def test_iter_stream_drains_all_terminal_events(fake_redis):
+    stream = StreamService()
+    request_id = "req_many_events_test"
+    await stream.init(request_id, 1, 1)
+    for index in range(250):
+        await stream.publish(request_id, "delta", {"content": str(index)})
+    await stream.set_status(request_id, "completed")
+    await stream.publish(
+        request_id,
+        "done",
+        {"assistant_message_id": 1, "token_count": 250, "finish_reason": "stop"},
+    )
+
+    events = [event async for event, _, _ in ChatService().iter_stream(request_id)]
+
+    assert len(events) == 251
+    assert events[-1] == "done"
+
+
+async def test_stream_heartbeat_prevents_false_stale(fake_redis, monkeypatch):
+    monkeypatch.setattr(settings, "CHAT_STREAM_STALE_SECONDS", 1)
+    stream = StreamService()
+    request_id = "req_heartbeat_test"
+    await stream.init(request_id, 1, 1)
+    await fake_redis.hset(f"chat:stream:{request_id}:meta", "updated_at", "1")
+
+    task = asyncio.create_task(ChatService()._heartbeat(stream, request_id))
+    try:
+        await asyncio.sleep(0.05)
+        meta = await stream.get_meta(request_id)
+        assert meta["updated_at"] != "1"
+        assert not StreamService.is_stale(meta)
+    finally:
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
 
 
 async def test_iter_stream_stale_yields_error(fake_redis, monkeypatch):

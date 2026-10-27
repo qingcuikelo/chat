@@ -27,6 +27,8 @@ _TIMESTAMP_COLUMNS: dict[str, tuple[str, ...]] = {
 
 def upgrade() -> None:
     """Upgrade schema."""
+    if op.get_bind().dialect.name != "mysql":
+        return
     for table, columns in _TIMESTAMP_COLUMNS.items():
         for column in columns:
             op.execute(
@@ -37,6 +39,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """Downgrade schema."""
+    if op.get_bind().dialect.name != "mysql":
+        return
     for table, columns in _TIMESTAMP_COLUMNS.items():
         for column in columns:
             op.execute(

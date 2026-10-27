@@ -123,6 +123,9 @@ class Settings(BaseSettings):
     CHAT_CONTEXT_MAX_MESSAGES: int = 40
     CHAT_CONTEXT_MAX_TOKENS: int = 65536
     CHAT_STREAM_HEARTBEAT: int = 15
+    CHAT_MAX_CONCURRENT_PER_USER: int = 2
+    CHAT_MAX_CONCURRENT_TOTAL: int = 100
+    CHAT_INFLIGHT_TTL_SECONDS: int = 3600
 
     # ---- SSE delta 合批 ----
     SSE_BATCH_MIN_CHARS: int = 24
@@ -197,6 +200,8 @@ class Settings(BaseSettings):
             problems.append("生产环境不能使用 SQLite")
         if self.DB_REPLICA_ENABLED and not self.DB_READ_URL.strip():
             problems.append("DB_REPLICA_ENABLED=true 时必须配置 DB_READ_URL")
+        if self.EMAIL_VERIFICATION_REQUIRED and not self.SMTP_HOST.strip():
+            problems.append("EMAIL_VERIFICATION_REQUIRED=true 时必须配置 SMTP_HOST")
 
         if problems:
             raise ValueError("生产配置校验失败：" + "；".join(problems))

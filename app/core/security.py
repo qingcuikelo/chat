@@ -8,8 +8,18 @@ import jwt
 
 from app.core.config import settings
 
+MAX_PASSWORD_BYTES = 72
+
+
+def validate_password_length(password: str) -> str:
+    """限制密码的 UTF-8 字节数，避免 bcrypt 超长输入异常或被静默截断。"""
+    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
+        raise ValueError(f"密码不能超过 {MAX_PASSWORD_BYTES} 个 UTF-8 字节")
+    return password
+
 
 def hash_password(password: str) -> str:
+    password = validate_password_length(password)
     if settings.PASSWORD_HASH_SCHEME.lower() == "argon2":
         from argon2 import PasswordHasher
 
@@ -18,6 +28,11 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
+    try:
+        password = validate_password_length(password)
+    except ValueError:
+        return False
+
     if settings.PASSWORD_HASH_SCHEME.lower() == "argon2":
         from argon2 import PasswordHasher
         from argon2.exceptions import (
@@ -37,11 +52,14 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def _create_token(subject: int | str, token_type: str, expires_delta: timedelta) -> str:
+def _create_token(
+    subject: int | str, token_type: str, expires_delta: timedelta, token_version: int = 0
+) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": str(subject),
         "type": token_type,
+        "ver": token_version,
         "jti": uuid.uuid4().hex,
         "iat": now,
         "exp": now + expires_delta,
@@ -49,12 +67,22 @@ def _create_token(subject: int | str, token_type: str, expires_delta: timedelta)
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
-def create_access_token(user_id: int | str) -> str:
-    return _create_token(user_id, "access", timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
+def create_access_token(user_id: int | str, token_version: int = 0) -> str:
+    return _create_token(
+        user_id,
+        "access",
+        timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
+        token_version,
+    )
 
 
-def create_refresh_token(user_id: int | str) -> str:
-    return _create_token(user_id, "refresh", timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS))
+def create_refresh_token(user_id: int | str, token_version: int = 0) -> str:
+    return _create_token(
+        user_id,
+        "refresh",
+        timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS),
+        token_version,
+    )
 
 
 def create_password_reset_token(user_id: int | str) -> str:

@@ -82,7 +82,7 @@ async def test_email_change_resets_verification(client, auth_headers):
     response = await client.patch(
         f"{API}/users/me",
         headers=auth_headers,
-        json={"email": "new@example.com"},
+        json={"email": "new@example.com", "current_password": "Passw0rd!"},
     )
     assert response.status_code == 200
     assert response.json()["email_verified"] is False

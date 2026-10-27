@@ -16,7 +16,8 @@ from app.core.database import Base
 config = context.config
 
 # 运行时以应用配置覆盖 alembic.ini 中的占位连接串
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# ConfigParser 会解释 %，URL 中编码后的密码需要转义为 %%
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

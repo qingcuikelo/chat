@@ -8,11 +8,13 @@ import asyncio
 import logging
 import time
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from typing import Any
 
 import anyio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.core.concurrency import release_chat_slot
 from app.core.config import settings
 from app.core.database import AsyncSessionLocal, utcnow
 from app.core.redis import get_redis
@@ -380,6 +382,20 @@ class ChatService:
                 logger.warning("收尾落库失败 conversation_id=%s", conversation_id, exc_info=True)
 
     # ---- 生产端（独立任务，不随连接取消）----
+    @staticmethod
+    def _heartbeat_interval() -> float:
+        stale_after = max(float(settings.CHAT_STREAM_STALE_SECONDS), 1.0)
+        return max(0.2, min(float(HEARTBEAT_INTERVAL_SECONDS), stale_after / 3))
+
+    async def _heartbeat(self, stream: StreamService, request_id: str) -> None:
+        """生成期间独立刷新流元数据，覆盖首 token、摘要等长耗时阶段。"""
+        while True:
+            try:
+                await stream.touch(request_id)
+            except Exception:
+                logger.warning("刷新流心跳失败 request_id=%s", request_id, exc_info=True)
+            await asyncio.sleep(self._heartbeat_interval())
+
     async def _generate(
         self,
         stream: StreamService,
@@ -403,7 +419,6 @@ class ChatService:
         buffer: list[str] = []
         buffered_chars = 0
         last_flush = time.monotonic()
-        last_touch = time.monotonic()
         zero_readers_since: float | None = None
 
         async for chunk in self.llm.stream_chat(prompt):
@@ -421,10 +436,6 @@ class ChatService:
                     buffer.clear()
                     buffered_chars = 0
                     last_flush = now
-
-                if now - last_touch >= HEARTBEAT_INTERVAL_SECONDS:
-                    await stream.touch(request_id)
-                    last_touch = now
 
                 if settings.CHAT_STREAM_ABANDON_TIMEOUT > 0:
                     if await stream.reader_count(request_id) == 0:
@@ -473,7 +484,6 @@ class ChatService:
                 already_persisted=persisted,
             )
         try:
-            await stream.set_status(request_id, STATUS_FAILED)
             await stream.publish(
                 request_id,
                 "error",
@@ -483,7 +493,11 @@ class ChatService:
                 },
             )
         except Exception:
-            logger.warning("写入流失败状态出错 request_id=%s", request_id, exc_info=True)
+            logger.warning("写入失败事件出错 request_id=%s", request_id, exc_info=True)
+        try:
+            await stream.set_status(request_id, STATUS_FAILED)
+        except Exception:
+            logger.warning("写入失败状态出错 request_id=%s", request_id, exc_info=True)
 
     async def run_generation(
         self,
@@ -499,6 +513,7 @@ class ChatService:
         assistant_parts: list[str] = []
         user_message_id: int | None = None
         persisted = False
+        heartbeat_task = asyncio.create_task(self._heartbeat(stream, request_id))
         try:
             # 分配 ID 并先入会话缓存（不落库），使本轮 prompt 含当前 user 消息
             user_message_id = await self._allocate_message_id()
@@ -537,7 +552,6 @@ class ChatService:
                 prompt_tokens=prompt_tokens,
             )
             persisted = True
-            await stream.set_status(request_id, STATUS_COMPLETED)
             await stream.publish(
                 request_id,
                 "done",
@@ -547,6 +561,10 @@ class ChatService:
                     "finish_reason": final_finish,
                 },
             )
+            try:
+                await stream.set_status(request_id, STATUS_COMPLETED)
+            except Exception:
+                logger.warning("写入完成状态失败 request_id=%s", request_id, exc_info=True)
         except _StreamAbandoned:
             logger.info("无订阅者超时，放弃生成 request_id=%s", request_id)
             await self._finalize_failed(
@@ -593,8 +611,13 @@ class ChatService:
                 getattr(exc, "code", "INTERNAL_ERROR"),
                 persisted,
             )
+        finally:
+            heartbeat_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await heartbeat_task
+            await release_chat_slot(user_id)
 
-    # ---- 消费端 ----
+    # ---- 断点续传 ----
     async def iter_stream(
         self, request_id: str, last_id: str | None = None
     ) -> AsyncIterator[tuple[str, dict[str, Any], str | None]]:
@@ -609,14 +632,22 @@ class ChatService:
             for entry_id, event, data in entries:
                 cursor = entry_id
                 yield event, data, entry_id
+                if event in ("done", "error"):
+                    return
 
             meta = await stream.get_meta(request_id)
             status = meta.get("status")
 
             if status in TERMINAL_STATUSES:
-                for entry_id, event, data in await stream.read_after(request_id, cursor):
-                    cursor = entry_id
-                    yield event, data, entry_id
+                while True:
+                    remaining = await stream.read_after(request_id, cursor)
+                    if not remaining:
+                        break
+                    for entry_id, event, data in remaining:
+                        cursor = entry_id
+                        yield event, data, entry_id
+                        if event in ("done", "error"):
+                            return
                 break
 
             if status is None:

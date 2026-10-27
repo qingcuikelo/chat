@@ -29,13 +29,15 @@ class TokenService:
         return self._redis or get_redis()
 
     # ---- access 黑名单 ----
-    async def blacklist_access(self, jti: str, ttl: int) -> None:
+    async def blacklist_access(self, jti: str, ttl: int, *, raise_on_failure: bool = False) -> None:
         if ttl <= 0:
             return
         try:
             await self.redis.set(BLACKLIST_KEY.format(jti=jti), "1", ex=ttl)
         except Exception:
             logger.warning("写入 access 黑名单失败 jti=%s", jti, exc_info=True)
+            if raise_on_failure:
+                raise
 
     async def is_blacklisted(self, jti: str) -> bool:
         try:
@@ -55,12 +57,24 @@ class TokenService:
         except Exception:
             logger.warning("写入 refresh 白名单失败 jti=%s", jti, exc_info=True)
 
-    async def is_refresh_active(self, jti: str) -> bool | None:
-        """True=有效；False=已失效/已用；None=Redis 故障（fail-open）。"""
+    async def consume_refresh(self, jti: str) -> int | None:
+        """原子消费 refresh 令牌；Redis 故障时抛出异常由调用方 fail-closed。"""
+        key = REFRESH_KEY.format(jti=jti)
         try:
-            return bool(await self.redis.exists(REFRESH_KEY.format(jti=jti)))
+            value = await self.redis.getdel(key)
         except Exception:
-            logger.warning("读取 refresh 白名单失败，fail-open 放行 jti=%s", jti, exc_info=True)
+            try:
+                value = await self.redis.get(key)
+                if value is not None:
+                    await self.redis.delete(key)
+            except Exception:
+                logger.warning("消费 refresh 令牌失败 jti=%s", jti, exc_info=True)
+                raise
+        if value is None:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
             return None
 
     async def revoke_refresh(self, jti: str) -> None:
@@ -69,8 +83,10 @@ class TokenService:
         except Exception:
             logger.warning("删除 refresh 白名单失败 jti=%s", jti, exc_info=True)
 
-    async def revoke_user_refresh_tokens(self, user_id: int) -> None:
-        """撤销指定用户的全部 refresh 令牌（密码重置后使用）。"""
+    async def revoke_user_refresh_tokens(
+        self, user_id: int, *, raise_on_failure: bool = False
+    ) -> None:
+        """撤销指定用户的全部 refresh 令牌（重新登录后使用）。"""
         try:
             async for key in self.redis.scan_iter(match="auth:refresh:*"):
                 value = await self.redis.get(key)
@@ -78,6 +94,8 @@ class TokenService:
                     await self.redis.delete(key)
         except Exception:
             logger.warning("撤销用户 refresh 令牌失败 user_id=%s", user_id, exc_info=True)
+            if raise_on_failure:
+                raise
 
     # ---- 密码重置一次性令牌 ----
     async def store_password_reset(self, jti: str, user_id: int, ttl: int) -> None:

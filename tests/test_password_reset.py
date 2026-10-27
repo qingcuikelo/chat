@@ -1,7 +1,10 @@
 """v3 WP4 登录锁定与密码找回测试。"""
 
+import pytest
+
 import app.services.auth_service as auth_module
 from app.core.config import settings
+from app.core.exceptions import InvalidRequestError
 
 API = "/api/v1"
 
@@ -81,6 +84,56 @@ async def test_password_reset_flow(client, auth_headers, monkeypatch):
 
     revoked = await client.post(f"{API}/auth/refresh", json={"refresh_token": old_refresh})
     assert revoked.status_code == 401
+
+    old_access = await client.get(f"{API}/users/me", headers=auth_headers)
+    assert old_access.status_code == 401
+
+
+async def test_long_password_does_not_consume_reset_token(client, auth_headers, monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def fake_dispatch(user, token: str) -> None:
+        captured["token"] = token
+
+    monkeypatch.setattr(auth_module, "dispatch_password_reset_email", fake_dispatch)
+
+    forgot = await client.post(f"{API}/auth/password/forgot", json={"email": "alice@example.com"})
+    assert forgot.status_code == 202
+
+    rejected = await client.post(
+        f"{API}/auth/password/reset",
+        json={"token": captured["token"], "new_password": "a" * 73},
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"]["code"] == "INVALID_REQUEST"
+
+    accepted = await client.post(
+        f"{API}/auth/password/reset",
+        json={"token": captured["token"], "new_password": "NewPassw0rd!"},
+    )
+    assert accepted.status_code == 200
+
+
+async def test_reset_service_does_not_consume_token_for_invalid_password(
+    client, auth_headers, session_factory, monkeypatch
+):
+    captured: dict[str, str] = {}
+
+    async def fake_dispatch(user, token: str) -> None:
+        captured["token"] = token
+
+    monkeypatch.setattr(auth_module, "dispatch_password_reset_email", fake_dispatch)
+    await client.post(f"{API}/auth/password/forgot", json={"email": "alice@example.com"})
+
+    async with session_factory() as session:
+        with pytest.raises(InvalidRequestError):
+            await auth_module.AuthService(session).reset_password(captured["token"], "a" * 73)
+
+    accepted = await client.post(
+        f"{API}/auth/password/reset",
+        json={"token": captured["token"], "new_password": "NewPassw0rd!"},
+    )
+    assert accepted.status_code == 200
 
 
 async def test_forgot_password_does_not_enumerate(client, monkeypatch):

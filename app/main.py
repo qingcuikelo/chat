@@ -16,7 +16,7 @@ from app import models as _models  # noqa: F401  确保模型完成注册
 from app.api.v1.router import api_router
 from app.core import lifecycle
 from app.core import redis as redis_client
-from app.core.config import settings
+from app.core.config import DEFAULT_JWT_SECRET, settings
 from app.core.database import dispose_read_engine, engine
 from app.core.exceptions import AppError
 from app.core.logging import setup_logging
@@ -31,6 +31,8 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     setup_logging()
+    if settings.APP_ENV.lower() != "production" and settings.JWT_SECRET_KEY == DEFAULT_JWT_SECRET:
+        logger.warning("开发环境正在使用默认 JWT 密钥，请勿将服务暴露到非可信网络")
     lifecycle.reset_shutdown_state()
     yield
     lifecycle.begin_shutdown()

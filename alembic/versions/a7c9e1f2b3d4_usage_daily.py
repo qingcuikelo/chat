@@ -18,11 +18,22 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _timestamp_default():
+    if op.get_bind().dialect.name == "sqlite":
+        return sa.text("CURRENT_TIMESTAMP")
+    return sa.text("now()")
+
+
 def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
         'usage_daily',
-        sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
+        sa.Column(
+            'id',
+            sa.BigInteger().with_variant(sa.Integer(), 'sqlite'),
+            autoincrement=True,
+            nullable=False,
+        ),
         sa.Column('user_id', sa.Integer(), nullable=False),
         sa.Column('usage_date', sa.Date(), nullable=False),
         sa.Column('prompt_tokens', sa.BigInteger(), server_default='0', nullable=False),
@@ -33,7 +44,7 @@ def upgrade() -> None:
         sa.Column(
             'updated_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=_timestamp_default(),
             nullable=False,
         ),
         sa.ForeignKeyConstraint(['user_id'], ['users.id'], ondelete='CASCADE'),

@@ -39,6 +39,9 @@ def test_database_name_validation():
     assert db_tools.validate_database_name("ai_chatbot_restore_test") == ("ai_chatbot_restore_test")
     with pytest.raises(ValueError):
         db_tools.validate_database_name("bad-name;DROP")
+    for name in ("mysql", "information_schema", "performance_schema", "sys"):
+        with pytest.raises(ValueError, match="系统数据库"):
+            db_tools.validate_database_name(name)
 
 
 def test_defaults_file_escapes_password(monkeypatch):

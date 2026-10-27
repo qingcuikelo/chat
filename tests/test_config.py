@@ -12,6 +12,7 @@ PRODUCTION = {
     "CORS_ORIGINS": "https://app.example.com",
     "ALLOWED_HOSTS": "api.example.com",
     "LLM_API_KEY": "sk-test",
+    "SMTP_HOST": "smtp.example.com",
     "DATABASE_URL": "mysql+aiomysql://user:pass@db:3306/ai_chatbot",
     "_env_file": None,
 }
@@ -33,6 +34,7 @@ def test_production_settings_valid():
         ("CORS_ORIGINS", "", "CORS_ORIGINS"),
         ("ALLOWED_HOSTS", "*", "ALLOWED_HOSTS"),
         ("LLM_API_KEY", "", "LLM_API_KEY"),
+        ("SMTP_HOST", "", "SMTP_HOST"),
         ("DATABASE_URL", "sqlite+aiosqlite:///./a.db", "SQLite"),
     ],
 )

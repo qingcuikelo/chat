@@ -34,7 +34,7 @@ cp .env.example .env             # PowerShell: Copy-Item .env.example .env
 - `DATABASE_URL`：MySQL 连接需带 `charset=utf8mb4`；SQLite 仅建议本地开发。
 - `REDIS_URL`：会话、令牌、限流、缓存与流式事件依赖 Redis。
 - `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。
-- 邮箱验证/密码找回需配置 `SMTP_*` 与 `PUBLIC_API_BASE_URL`。
+- 邮箱验证默认开启，密码找回也依赖邮件：配置 `SMTP_*` 与 `PUBLIC_API_BASE_URL`；开发环境未配置 SMTP 时，验证/重置链接会输出到日志。仅本地调试可显式设置 `EMAIL_VERIFICATION_REQUIRED=false`，生产必须开启并配置 SMTP。
 
 ### 3. 初始化数据库
 
@@ -78,9 +78,9 @@ scripts/backup_db.sh --keep-days 7
 scripts/restore_db.sh <backup.sql.gz> <target_db> --yes
 ```
 
-备份默认写入 `backups/`，保留期可通过 `--keep-days` 或 `BACKUP_KEEP_DAYS` 设置。
+备份默认写入 `backups/`，保留期可通过 `--keep-days` 或 `BACKUP_KEEP_DAYS` 设置。恢复到已存在的目标库时需显式添加 `--allow-overwrite`；恢复后建议清理 Redis 缓存并重置 `chat:message_id`（或使用独立 Redis）。
 
-可选能力默认关闭：`DB_REPLICA_ENABLED`、`MESSAGE_ARCHIVE_ENABLED`、`WRITE_QUEUE_ENABLED`；启用后需确保 ARQ worker 正常运行。配额统计始终可用，`QUOTA_ENFORCE=true` 时才会拦截超额请求。
+可选能力默认关闭：`DB_REPLICA_ENABLED`、`MESSAGE_ARCHIVE_ENABLED`、`WRITE_QUEUE_ENABLED`；启用后需确保 ARQ worker 正常运行。配额统计始终可用，`QUOTA_ENFORCE=true` 时才会拦截超额请求。聊天生成默认限制为每用户 2 路、全实例 100 路，可通过 `CHAT_MAX_CONCURRENT_PER_USER` / `CHAT_MAX_CONCURRENT_TOTAL` 调整。
 
 ## 生产注意
 

@@ -111,6 +111,12 @@ class ServerShuttingDownError(AppError):
     message = "服务正在停机，请稍后重试"
 
 
+class ServiceUnavailableError(AppError):
+    status_code = 503
+    code = "SERVICE_UNAVAILABLE"
+    message = "服务暂时不可用，请稍后重试"
+
+
 class LLMError(AppError):
     status_code = 502
     code = "LLM_ERROR"

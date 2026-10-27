@@ -2,11 +2,12 @@
 
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, utcnow
 from app.core.exceptions import InvalidRequestError
+from app.core.security import remaining_ttl
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.schemas.usage import QuotaRead, UsageDayRead, UsageRangeRead
@@ -25,10 +26,17 @@ async def get_me(current_user: User = Depends(get_current_user)) -> User:
 @router.patch("/me", response_model=UserRead)
 async def update_me(
     payload: UserUpdate,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> User:
-    return await UserService(db).update_me(current_user, payload)
+    claims = request.state.access_token_claims
+    return await UserService(db).update_me(
+        current_user,
+        payload,
+        access_jti=claims.get("jti"),
+        access_ttl=remaining_ttl(claims),
+    )
 
 
 @router.get("/me/usage", response_model=UsageRangeRead)

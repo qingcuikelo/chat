@@ -12,11 +12,19 @@ logger = logging.getLogger(__name__)
 
 
 class MailService:
-    def build_verification_email(self, to_email: str, token: str) -> EmailMessage:
-        link = (
+    @staticmethod
+    def verification_link(token: str) -> str:
+        return (
             f"{settings.PUBLIC_API_BASE_URL.rstrip('/')}"
             f"{settings.API_V1_PREFIX}/auth/verify-email?token={token}"
         )
+
+    @staticmethod
+    def password_reset_link(token: str) -> str:
+        return f"{settings.APP_BASE_URL.rstrip('/')}/reset-password?token={token}"
+
+    def build_verification_email(self, to_email: str, token: str) -> EmailMessage:
+        link = self.verification_link(token)
         message = EmailMessage()
         message["From"] = settings.MAIL_FROM
         message["To"] = to_email
@@ -31,7 +39,7 @@ class MailService:
         return message
 
     def build_password_reset_email(self, to_email: str, token: str) -> EmailMessage:
-        link = f"{settings.APP_BASE_URL.rstrip('/')}/reset-password?token={token}"
+        link = self.password_reset_link(token)
         message = EmailMessage()
         message["From"] = settings.MAIL_FROM
         message["To"] = to_email
@@ -47,7 +55,13 @@ class MailService:
 
     async def send_password_reset_email(self, to_email: str, token: str) -> bool:
         if not settings.SMTP_HOST:
-            logger.warning("未配置 SMTP，跳过密码重置邮件发送 to=%s", to_email)
+            if settings.APP_ENV.lower() != "production":
+                logger.warning(
+                    "未配置 SMTP；开发环境密码重置链接: %s",
+                    self.password_reset_link(token),
+                )
+            else:
+                logger.warning("未配置 SMTP，跳过密码重置邮件发送 to=%s", to_email)
             return False
         message = self.build_password_reset_email(to_email, token)
         try:
@@ -67,7 +81,13 @@ class MailService:
 
     async def send_verification_email(self, to_email: str, token: str) -> bool:
         if not settings.SMTP_HOST:
-            logger.warning("未配置 SMTP，跳过验证邮件发送 to=%s", to_email)
+            if settings.APP_ENV.lower() != "production":
+                logger.warning(
+                    "未配置 SMTP；开发环境验证链接: %s",
+                    self.verification_link(token),
+                )
+            else:
+                logger.warning("未配置 SMTP，跳过验证邮件发送 to=%s", to_email)
             return False
         message = self.build_verification_email(to_email, token)
         try:

@@ -28,7 +28,12 @@ def upgrade() -> None:
         ),
     )
     op.add_column(
-        "users", sa.Column("email_verified_at", mysql.DATETIME(fsp=6), nullable=True)
+        "users",
+        sa.Column(
+            "email_verified_at",
+            sa.DateTime(timezone=True).with_variant(mysql.DATETIME(fsp=6), "mysql"),
+            nullable=True,
+        ),
     )
     # 既有账号视为已验证，避免被强制验证锁死
     op.execute(

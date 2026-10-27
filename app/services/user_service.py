@@ -3,8 +3,13 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.core.exceptions import ConflictError, UserNotFoundError
-from app.core.security import hash_password
+from app.core.exceptions import (
+    ConflictError,
+    InvalidRequestError,
+    ServiceUnavailableError,
+    UserNotFoundError,
+)
+from app.core.security import hash_password, verify_password
 from app.models.user import User
 from app.repositories.conversation_repository import ConversationRepository
 from app.repositories.message_repository import MessageRepository
@@ -12,6 +17,7 @@ from app.repositories.user_repository import UserRepository
 from app.schemas.user import UserUpdate
 from app.services.cache_service import CacheService
 from app.services.mail_service import dispatch_verification_email
+from app.services.token_service import TokenService
 
 
 class UserService:
@@ -21,8 +27,16 @@ class UserService:
         self.conversations = ConversationRepository(db)
         self.messages = MessageRepository(db)
         self.cache = CacheService()
+        self.tokens = TokenService()
 
-    async def update_me(self, current_user: User, payload: UserUpdate) -> User:
+    async def update_me(
+        self,
+        current_user: User,
+        payload: UserUpdate,
+        *,
+        access_jti: str | None = None,
+        access_ttl: int = 0,
+    ) -> User:
         user = await self.users.get(current_user.id)
         if user is None:
             raise UserNotFoundError()
@@ -35,18 +49,35 @@ class UserService:
                 raise ConflictError(code="EMAIL_TAKEN", message="邮箱已被占用")
 
         email_changed = payload.email is not None and payload.email != user.email
+        password_changed = payload.password is not None
+        sensitive_change = password_changed or email_changed
+        if sensitive_change:
+            if not verify_password(payload.current_password or "", user.password_hash):
+                raise InvalidRequestError("修改密码或邮箱需要提供正确的当前密码")
 
         fields: dict = {}
         if payload.username is not None:
             fields["username"] = payload.username
         if payload.email is not None:
             fields["email"] = payload.email
-        if payload.password is not None:
-            fields["password_hash"] = hash_password(payload.password)
+        if password_changed:
+            fields["password_hash"] = hash_password(payload.password or "")
+        if sensitive_change:
+            fields["token_version"] = (user.token_version or 0) + 1
         if email_changed and settings.EMAIL_VERIFICATION_REQUIRED:
-            # 邮箱变更后需重新验证
+            # 邮箱变更后重新进入验证流程
             fields["email_verified"] = False
             fields["email_verified_at"] = None
+
+        if sensitive_change:
+            try:
+                await self.tokens.revoke_user_refresh_tokens(user.id, raise_on_failure=True)
+                if access_jti:
+                    await self.tokens.blacklist_access(
+                        access_jti, access_ttl, raise_on_failure=True
+                    )
+            except Exception as exc:
+                raise ServiceUnavailableError("会话撤销失败，请稍后重试") from exc
 
         user = await self.users.update(user, **fields)
         await self.db.commit()

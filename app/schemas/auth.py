@@ -1,6 +1,8 @@
 """认证相关 Schema。"""
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
+
+from app.core.security import validate_password_length
 
 
 class RegisterRequest(BaseModel):
@@ -8,11 +10,21 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
 
+    @field_validator("password")
+    @classmethod
+    def _check_password_length(cls, value: str) -> str:
+        return validate_password_length(value)
+
 
 class LoginRequest(BaseModel):
     username: str | None = None
     email: EmailStr | None = None
     password: str = Field(min_length=1)
+
+    @field_validator("password")
+    @classmethod
+    def _check_password_length(cls, value: str) -> str:
+        return validate_password_length(value)
 
 
 class RefreshRequest(BaseModel):
@@ -38,6 +50,11 @@ class PasswordForgotRequest(BaseModel):
 class PasswordResetRequest(BaseModel):
     token: str
     new_password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def _check_password_length(cls, value: str) -> str:
+        return validate_password_length(value)
 
 
 class TokenPair(BaseModel):

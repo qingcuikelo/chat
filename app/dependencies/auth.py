@@ -1,7 +1,7 @@
 """认证依赖：从 Bearer Token 解析当前用户。"""
 
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 async def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: AsyncSession = Depends(get_db),
 ) -> User:
@@ -37,16 +38,19 @@ async def get_current_user(
     if jti and await TokenService().is_blacklisted(jti):
         raise UnauthorizedError()
 
+    request.state.access_token_claims = claims
     user_id = int(claims["sub"])
     user_id_var.set(str(user_id))
 
     cache = CacheService()
     cached_user = await cache.get_user(user_id)
     if cached_user is not None:
+        if int(claims.get("ver", 0)) != int(cached_user.token_version or 0):
+            raise UnauthorizedError()
         return cached_user
 
     user = await db.get(User, user_id)
-    if user is None:
+    if user is None or int(claims.get("ver", 0)) != int(user.token_version or 0):
         raise UnauthorizedError()
 
     await cache.set_user(user)

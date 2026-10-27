@@ -18,6 +18,7 @@ from pathlib import Path
 from sqlalchemy.engine import make_url
 
 DB_NAME_PATTERN = re.compile(r"^[A-Za-z0-9_]+$")
+SYSTEM_DATABASES = {"mysql", "information_schema", "performance_schema", "sys"}
 BACKUP_GLOB = "ai_chatbot_*.sql.gz"
 KNOWN_TABLES = ("users", "conversation", "messages", "messages_archive", "usage_daily")
 
@@ -34,6 +35,8 @@ class DbConfig:
 def validate_database_name(name: str) -> str:
     if not DB_NAME_PATTERN.fullmatch(name):
         raise ValueError(f"非法数据库名: {name!r}")
+    if name.lower() in SYSTEM_DATABASES:
+        raise ValueError(f"禁止使用系统数据库: {name!r}")
     return name
 
 
@@ -204,6 +207,24 @@ def restore_database(
     opener = gzip.open if backup.suffix == ".gz" else open
 
     with mysql_defaults_file(source) as defaults_file:
+        existing = (
+            _run_mysql(
+                mysql_bin,
+                defaults_file,
+                [
+                    "-N",
+                    "-B",
+                    "-e",
+                    "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA "
+                    f"WHERE SCHEMA_NAME = '{target}'",
+                ],
+            )
+            .decode("utf-8", errors="replace")
+            .strip()
+        )
+        if existing and not allow_overwrite:
+            raise ValueError("目标数据库已存在；确认覆盖请显式添加 --allow-overwrite")
+
         _run_mysql(
             mysql_bin,
             defaults_file,

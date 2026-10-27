@@ -17,6 +17,27 @@ SECURITY_HEADERS = (
     ),
 )
 
+DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
+DOCS_CSP = (
+    "default-src 'none'; "
+    "script-src 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "img-src https://fastapi.tiangolo.com data:; "
+    "font-src https://cdn.jsdelivr.net https://fonts.gstatic.com data:; "
+    "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+)
+
+
+def _security_headers(path: str) -> tuple[tuple[str, str], ...]:
+    if path in DOCS_PATHS or path.startswith("/docs/"):
+        return tuple(
+            ("Content-Security-Policy", DOCS_CSP)
+            if name == "Content-Security-Policy"
+            else (name, value)
+            for name, value in SECURITY_HEADERS
+        )
+    return SECURITY_HEADERS
+
 
 class SecurityHeadersMiddleware:
     def __init__(self, app) -> None:
@@ -31,7 +52,7 @@ class SecurityHeadersMiddleware:
             if message["type"] == "http.response.start":
                 headers = list(message.get("headers") or [])
                 existing = {name.lower() for name, _ in headers}
-                for name, value in SECURITY_HEADERS:
+                for name, value in _security_headers(scope.get("path", "")):
                     if name.encode().lower() not in existing:
                         headers.append((name.encode(), value.encode()))
                 if scope.get("scheme") == "https":

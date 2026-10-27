@@ -18,6 +18,15 @@ async def test_security_headers_present(client):
     assert "strict-transport-security" not in response.headers
 
 
+async def test_docs_csp_allows_swagger_assets(client):
+    response = await client.get("/docs")
+
+    assert response.status_code == 200
+    csp = response.headers["content-security-policy"]
+    assert "https://cdn.jsdelivr.net" in csp
+    assert "default-src 'none'" in csp
+
+
 async def test_hsts_only_on_https():
     app = create_app()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="https://test") as client:

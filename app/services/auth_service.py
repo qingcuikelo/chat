@@ -12,6 +12,7 @@ from app.core.exceptions import (
     InvalidCredentialsError,
     InvalidRequestError,
     PasswordResetInvalidError,
+    ServiceUnavailableError,
     TokenExpiredError,
     UnauthorizedError,
 )
@@ -63,16 +64,20 @@ class AuthService:
         return user
 
     async def login(self, payload: LoginRequest, *, client_ip: str = "") -> TokenPair:
-        identifier = payload.username or payload.email
+        username = payload.username.strip() if payload.username else None
+        email = str(payload.email) if payload.email else None
+        identifier = username or email
         if not identifier:
             raise InvalidCredentialsError("请提供用户名或邮箱")
 
-        identifier = identifier.strip()
         lock_key = identifier.lower()
         ip = (client_ip or "unknown").strip().lower()
         await self._ensure_not_locked(lock_key, ip)
 
-        user = await self.users.get_by_username_or_email(identifier)
+        if username:
+            user = await self.users.get_by_username(username)
+        else:
+            user = await self.users.get_by_email(email or "")
         if user is None or not verify_password(payload.password, user.password_hash):
             await self._register_login_failure(lock_key, ip)
             raise InvalidCredentialsError()
@@ -80,7 +85,7 @@ class AuthService:
             raise EmailNotVerifiedError()
 
         await self.tokens.clear_login_failures(lock_key, ip)
-        return await self._issue_tokens(user.id)
+        return await self._issue_tokens(user.id, user.token_version)
 
     async def forgot_password(self, email: str) -> None:
         """发送密码重置邮件；无论邮箱是否存在都保持同一响应。"""
@@ -104,15 +109,22 @@ class AuthService:
         if claims.get("type") != "password_reset" or not claims.get("jti"):
             raise PasswordResetInvalidError()
 
+        user = await self.users.get(int(claims["sub"]))
+        if user is None:
+            raise PasswordResetInvalidError()
+
+        # 先完成密码校验/哈希，避免无效密码消耗一次性 token。
+        try:
+            password_hash = hash_password(new_password)
+        except ValueError as exc:
+            raise InvalidRequestError(str(exc)) from exc
+
         user_id = await self.tokens.consume_password_reset(claims["jti"])
         if user_id is None or str(user_id) != str(claims.get("sub")):
             raise PasswordResetInvalidError()
 
-        user = await self.users.get(user_id)
-        if user is None:
-            raise PasswordResetInvalidError()
-
-        user.password_hash = hash_password(new_password)
+        user.password_hash = password_hash
+        user.token_version = (user.token_version or 0) + 1
         await self.db.commit()
         await self.cache.invalidate_user(user.id)
         await self.tokens.revoke_user_refresh_tokens(user.id)
@@ -173,17 +185,18 @@ class AuthService:
         if not jti:
             raise UnauthorizedError("无效的刷新令牌")
 
-        active = await self.tokens.is_refresh_active(jti)
-        if active is False:
+        try:
+            token_user_id = await self.tokens.consume_refresh(jti)
+        except Exception as exc:
+            raise ServiceUnavailableError("令牌服务暂不可用，请稍后重试") from exc
+        if token_user_id is None or str(token_user_id) != str(claims.get("sub")):
             raise UnauthorizedError("刷新令牌已失效")
 
-        user = await self.users.get(int(claims["sub"]))
-        if user is None:
+        user = await self.users.get(token_user_id)
+        if user is None or int(claims.get("ver", 0)) != int(user.token_version or 0):
             raise UnauthorizedError()
 
-        # 轮换：旧 refresh 一次性作废
-        await self.tokens.revoke_refresh(jti)
-        return await self._issue_tokens(user.id)
+        return await self._issue_tokens(user.id, user.token_version)
 
     async def logout(self, access_token: str, refresh_token: str | None = None) -> None:
         """作废当前 access 令牌；如提供 refresh，则一并作废。"""
@@ -213,9 +226,9 @@ class AuthService:
         except jwt.InvalidTokenError as exc:
             raise UnauthorizedError() from exc
 
-    async def _issue_tokens(self, user_id: int) -> TokenPair:
-        access_token = create_access_token(user_id)
-        refresh_token = create_refresh_token(user_id)
+    async def _issue_tokens(self, user_id: int, token_version: int) -> TokenPair:
+        access_token = create_access_token(user_id, token_version)
+        refresh_token = create_refresh_token(user_id, token_version)
         refresh_claims = decode_token(refresh_token)
         await self.tokens.store_refresh(
             refresh_claims["jti"], user_id, remaining_ttl(refresh_claims)

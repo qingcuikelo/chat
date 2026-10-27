@@ -18,6 +18,12 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _timestamp_default():
+    if op.get_bind().dialect.name == "sqlite":
+        return sa.text("CURRENT_TIMESTAMP")
+    return sa.text("now()")
+
+
 def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
@@ -30,7 +36,7 @@ def upgrade() -> None:
         sa.Column(
             'created_at',
             sa.DateTime(timezone=True),
-            server_default=sa.text('now()'),
+            server_default=_timestamp_default(),
             nullable=False,
         ),
         sa.Column('metadata', sa.JSON(), nullable=True),

@@ -49,3 +49,34 @@ jobs:
         run: >-
           python -m pytest -q -rf --tb=short --cov=app
           --cov-report=term-missing --cov-fail-under=80
+
+  migration:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ai_chatbot
+          MYSQL_USER: app
+          MYSQL_PASSWORD: app
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      DATABASE_URL: mysql+aiomysql://app:app@127.0.0.1:3306/ai_chatbot?charset=utf8mb4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - name: alembic upgrade head
+        run: python -m alembic upgrade head
+      - name: alembic check
+        run: python -m alembic check

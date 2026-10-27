@@ -11,10 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sse_starlette.sse import EventSourceResponse
 
 from app.core import lifecycle
+from app.core.concurrency import acquire_chat_slot, release_chat_slot
 from app.core.config import settings
 from app.core.context import conversation_id_var
 from app.core.database import get_db, get_session_factory
-from app.core.exceptions import AppError, ServerShuttingDownError, StreamNotFoundError
+from app.core.exceptions import (
+    AppError,
+    RateLimitedError,
+    ServerShuttingDownError,
+    StreamNotFoundError,
+)
 from app.core.openapi import error_response, sse_response
 from app.core.rate_limit import check_rate_limit
 from app.dependencies.auth import get_current_user
@@ -125,23 +131,29 @@ async def chat(
     # 结束请求级事务，释放连接：流式期间改用独立短生命周期会话
     await db.rollback()
 
+    if not await acquire_chat_slot(current_user.id):
+        raise RateLimitedError("同时进行的聊天过多，请稍后重试", headers={"Retry-After": "5"})
+
     request_id = f"req_{uuid.uuid4().hex[:12]}"
     stream = StreamService()
-    await stream.init(request_id, current_user.id, conversation_id)
-
-    service = ChatService(session_factory=session_factory)
     try:
-        lifecycle.spawn_generation(
-            service.run_generation(
-                request_id=request_id,
-                conversation_id=conversation_id,
-                user_id=current_user.id,
-                user_message=payload.message,
-            ),
-            name=f"chat:{request_id}",
-        )
-    except RuntimeError as exc:
-        raise ServerShuttingDownError() from exc
+        await stream.init(request_id, current_user.id, conversation_id)
+        service = ChatService(session_factory=session_factory)
+        try:
+            lifecycle.spawn_generation(
+                service.run_generation(
+                    request_id=request_id,
+                    conversation_id=conversation_id,
+                    user_id=current_user.id,
+                    user_message=payload.message,
+                ),
+                name=f"chat:{request_id}",
+            )
+        except RuntimeError as exc:
+            raise ServerShuttingDownError() from exc
+    except BaseException:
+        await release_chat_slot(current_user.id)
+        raise
 
     return EventSourceResponse(
         _sse_generator(service, request_id, None, stream),

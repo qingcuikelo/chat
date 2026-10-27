@@ -1,6 +1,6 @@
-# AI ChatBot API 契约（v1）
+﻿# AI ChatBot API 契约（v1）
 
-> 应用版本：`0.3.0`（API 路径版本：`v1`）。最后更新：2026-10-26。
+> 应用版本：`0.3.0`（API 路径版本：`v1`）。最后更新：2026-10-27。
 >
 > 在线契约：`/openapi.json`、`/docs`（Swagger UI）、`/redoc`。本文档补充 OpenAPI 无法完整表达的 SSE 事件、错误码与版本策略。
 
@@ -13,6 +13,7 @@
 - Access Token 默认 60 分钟，Refresh Token 默认 7 天；刷新采用轮换，旧 Refresh Token 立即失效。
 - 响应默认 JSON（UTF-8）；导出接口可能返回 JSON 或 Markdown 附件，SSE 接口返回 `text/event-stream`。
 - 时间字段使用 UTC，ISO 8601 格式；数据库时间不携带时区偏移。
+- 密码长度为 8–128 字符，且 UTF-8 编码不得超过 72 字节（bcrypt 限制）；修改密码或邮箱还需 `current_password`。
 - 响应头会回显 `X-Request-ID`（可由请求头传入），便于日志排查。
 
 ### 1.2 错误信封
@@ -59,12 +60,12 @@
 | POST | `/api/v1/auth/refresh` | 否 | 轮换 Refresh Token |
 | POST | `/api/v1/auth/logout` | 是 | 撤销当前 Access Token，可同时撤销 Refresh Token；204 |
 | POST | `/api/v1/auth/password/forgot` | 否 | 发送重置邮件；202，账号不存在也返回相同结果 |
-| POST | `/api/v1/auth/password/reset` | 否 | 一次性重置密码；无效/过期返回 `PASSWORD_RESET_INVALID` |
+| POST | `/api/v1/auth/password/reset` | 否 | 一次性重置密码并撤销全部旧会话；无效/过期返回 `PASSWORD_RESET_INVALID` |
 | POST | `/api/v1/auth/verify-email` | 否 | 验证邮箱 token |
 | GET | `/api/v1/auth/verify-email?token=...` | 否 | 邮件链接落地页，返回 HTML |
 | POST | `/api/v1/auth/resend-verification` | 否 | 重发验证邮件；202，账号不存在/已验证也返回相同结果 |
 | GET | `/api/v1/users/me` | 是 | 当前用户资料 |
-| PATCH | `/api/v1/users/me` | 是 | 修改用户名/邮箱/密码 |
+| PATCH | `/api/v1/users/me` | 是 | 修改用户名/邮箱/密码；改密或改邮箱需 `current_password` 并撤销旧会话 |
 | DELETE | `/api/v1/users/me` | 是 | 删除账号及会话/消息；204 |
 | GET | `/api/v1/users/me/usage` | 是 | 按日 token 用量（默认最近 7 天，范围 ≤366 天） |
 | GET | `/api/v1/users/me/quota` | 是 | 当日配额、已用、剩余与是否强制 |
@@ -203,12 +204,13 @@ data: {"assistant_message_id":42,"token_count":128,"finish_reason":"stop"}
 | 409 | `CONFLICT` | 资源冲突 |
 | 409 | `USERNAME_TAKEN` | 用户名已占用 |
 | 409 | `EMAIL_TAKEN` | 邮箱已占用 |
-| 429 | `RATE_LIMITED` | 请求频率超限，带 `Retry-After` |
+| 429 | `RATE_LIMITED` | 请求频率超限或并发聊天过多，带 `Retry-After` |
 | 429 | `ACCOUNT_LOCKED` | 登录失败次数过多，带 `Retry-After` |
 | 429 | `QUOTA_EXCEEDED` | 每日 token 配额用尽，带 `Retry-After` 与 `X-Quota-*` |
 | 500 | `INTERNAL_ERROR` | 未处理异常；SSE 流内也可能出现 |
 | 502 | `LLM_ERROR` | 模型服务失败；通常以 SSE `error` 事件返回 |
 | 503 | `SERVER_SHUTTING_DOWN` | 服务停机排空期间拒绝新聊天 |
+| 503 | `SERVICE_UNAVAILABLE` | 会话撤销等关键 Redis 操作暂不可用 |
 | SSE | `STREAM_STALE` | 流元数据超过 `CHAT_STREAM_STALE_SECONDS` 未更新 |
 
 ## 5. 配置契约
@@ -230,6 +232,8 @@ data: {"assistant_message_id":42,"token_count":128,"finish_reason":"stop"}
 | `WRITE_QUEUE_BATCH_SIZE` | `64` | 写队列批量大小 |
 | `WRITE_QUEUE_BATCH_MAX_WAIT_MS` | `200` | 批量最大等待 |
 | `WRITE_QUEUE_MAX_ATTEMPTS` | `5` | 写队列最大尝试次数 |
+| `EMAIL_VERIFICATION_REQUIRED` | `true` | 是否要求邮箱验证；生产启用时必须配置 SMTP |
+| `SMTP_HOST` | `""` | 邮件发送主机；生产启用验证时必填 |
 | `AUTH_LOCKOUT_THRESHOLD` | `10` | 登录失败锁定阈值；`0` 关闭 |
 | `AUTH_LOCKOUT_MINUTES` | `15` | 锁定时长（分钟） |
 | `PASSWORD_RESET_TOKEN_EXPIRE_MINUTES` | `30` | 密码重置 token 有效期 |
@@ -239,6 +243,9 @@ data: {"assistant_message_id":42,"token_count":128,"finish_reason":"stop"}
 | `USER_DAILY_TOKEN_QUOTA` | `0` | 每用户每日 token 配额；`0` 关闭 |
 | `QUOTA_ENFORCE` | `false` | `true` 时超配额返回 429；`false` 只统计 |
 | `USAGE_RETENTION_DAYS` | `365` | 用量明细保留天数，worker 每日清理 |
+| `CHAT_MAX_CONCURRENT_PER_USER` | `2` | 每用户同时生成上限；`0` 表示不限制 |
+| `CHAT_MAX_CONCURRENT_TOTAL` | `100` | 全实例同时生成上限；`0` 表示不限制 |
+| `CHAT_INFLIGHT_TTL_SECONDS` | `3600` | 并发计数异常残留的自动过期时间 |
 
 - `APP_ENV=production` 时启动校验默认密钥、`DEBUG`、`CORS_ORIGINS`、`ALLOWED_HOSTS`、LLM Key、SQLite 与从库配置。
 - WP8 的写队列/归档/读写分离默认关闭；写队列需要单独运行 ARQ worker。
