@@ -1,9 +1,11 @@
 """邮件构建与发送降级测试。"""
 
 import logging
+from types import SimpleNamespace
 
+import app.workers.queue as queue_module
 from app.core.config import settings
-from app.services.mail_service import MailService
+from app.services.mail_service import MailService, dispatch_verification_email
 
 
 def test_build_verification_email(monkeypatch):
@@ -39,3 +41,20 @@ async def test_development_logs_verification_link_without_smtp(monkeypatch, capl
         assert await MailService().send_verification_email("a@example.com", "dev-token") is False
 
     assert "https://api.example.com/api/v1/auth/verify-email?token=dev-token" in caplog.text
+
+
+async def test_dispatch_uses_queue_when_worker_heartbeat_present(fake_redis, monkeypatch):
+    captured: dict[str, str] = {}
+
+    async def fake_enqueue(to_email: str, token: str) -> None:
+        captured["email"] = to_email
+        captured["token"] = token
+
+    monkeypatch.setattr(queue_module, "enqueue_verification_email", fake_enqueue)
+    await fake_redis.set("worker:heartbeat", "1")
+
+    user = SimpleNamespace(id=1, email="a@example.com")
+    await dispatch_verification_email(user)
+
+    assert captured["email"] == "a@example.com"
+    assert captured["token"]

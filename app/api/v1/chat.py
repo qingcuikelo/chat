@@ -131,7 +131,8 @@ async def chat(
     # 结束请求级事务，释放连接：流式期间改用独立短生命周期会话
     await db.rollback()
 
-    if not await acquire_chat_slot(current_user.id):
+    allowed, slot_counted = await acquire_chat_slot(current_user.id)
+    if not allowed:
         raise RateLimitedError("同时进行的聊天过多，请稍后重试", headers={"Retry-After": "5"})
 
     request_id = f"req_{uuid.uuid4().hex[:12]}"
@@ -146,13 +147,15 @@ async def chat(
                     conversation_id=conversation_id,
                     user_id=current_user.id,
                     user_message=payload.message,
+                    slot_counted=slot_counted,
                 ),
                 name=f"chat:{request_id}",
             )
         except RuntimeError as exc:
             raise ServerShuttingDownError() from exc
     except BaseException:
-        await release_chat_slot(current_user.id)
+        if slot_counted:
+            await release_chat_slot(current_user.id)
         raise
 
     return EventSourceResponse(

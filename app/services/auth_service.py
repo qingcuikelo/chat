@@ -230,9 +230,15 @@ class AuthService:
         access_token = create_access_token(user_id, token_version)
         refresh_token = create_refresh_token(user_id, token_version)
         refresh_claims = decode_token(refresh_token)
-        await self.tokens.store_refresh(
-            refresh_claims["jti"], user_id, remaining_ttl(refresh_claims)
-        )
+        try:
+            await self.tokens.store_refresh(
+                refresh_claims["jti"],
+                user_id,
+                remaining_ttl(refresh_claims),
+                raise_on_failure=True,
+            )
+        except Exception as exc:
+            raise ServiceUnavailableError("令牌服务暂不可用，请稍后重试") from exc
         return TokenPair(
             access_token=access_token,
             refresh_token=refresh_token,

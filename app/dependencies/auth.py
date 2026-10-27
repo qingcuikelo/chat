@@ -3,6 +3,7 @@
 import jwt
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.context import user_id_var
@@ -45,7 +46,11 @@ async def get_current_user(
     cache = CacheService()
     cached_user = await cache.get_user(user_id)
     if cached_user is not None:
-        if int(claims.get("ver", 0)) != int(cached_user.token_version or 0):
+        # 用户缓存可能被并发旧请求回填，token_version 必须以数据库为准。
+        authoritative_version = await db.scalar(
+            select(User.token_version).where(User.id == user_id)
+        )
+        if authoritative_version is None or int(claims.get("ver", 0)) != int(authoritative_version):
             raise UnauthorizedError()
         return cached_user
 

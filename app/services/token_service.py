@@ -19,6 +19,25 @@ REFRESH_KEY = "auth:refresh:{jti}"
 PASSWORD_RESET_KEY = "auth:pwdreset:{jti}"
 LOCKOUT_KEY = "auth:lockout:{identifier}:{ip}"
 
+_CONSUME_REFRESH_SCRIPT = """
+local value = redis.call('GET', KEYS[1])
+if value then
+  redis.call('DEL', KEYS[1])
+end
+return value
+"""
+
+
+def _script(redis, attr: str, source: str):
+    script = getattr(redis, attr, None)
+    if script is None:
+        script = redis.register_script(source)
+        try:
+            setattr(redis, attr, script)
+        except Exception:
+            pass
+    return script
+
 
 class TokenService:
     def __init__(self, redis: Any | None = None) -> None:
@@ -47,7 +66,9 @@ class TokenService:
             return False
 
     # ---- refresh 白名单 ----
-    async def store_refresh(self, jti: str, user_id: int, ttl: int) -> None:
+    async def store_refresh(
+        self, jti: str, user_id: int, ttl: int, *, raise_on_failure: bool = False
+    ) -> None:
         try:
             key = REFRESH_KEY.format(jti=jti)
             if ttl > 0:
@@ -56,20 +77,18 @@ class TokenService:
                 await self.redis.set(key, str(user_id))
         except Exception:
             logger.warning("写入 refresh 白名单失败 jti=%s", jti, exc_info=True)
+            if raise_on_failure:
+                raise
 
     async def consume_refresh(self, jti: str) -> int | None:
-        """原子消费 refresh 令牌；Redis 故障时抛出异常由调用方 fail-closed。"""
+        """用 Lua 原子消费 refresh 令牌；Redis 故障时抛出异常由调用方 fail-closed。"""
         key = REFRESH_KEY.format(jti=jti)
         try:
-            value = await self.redis.getdel(key)
+            script = _script(self.redis, "_consume_refresh_script", _CONSUME_REFRESH_SCRIPT)
+            value = await script(keys=[key])
         except Exception:
-            try:
-                value = await self.redis.get(key)
-                if value is not None:
-                    await self.redis.delete(key)
-            except Exception:
-                logger.warning("消费 refresh 令牌失败 jti=%s", jti, exc_info=True)
-                raise
+            logger.warning("消费 refresh 令牌失败 jti=%s", jti, exc_info=True)
+            raise
         if value is None:
             return None
         try:

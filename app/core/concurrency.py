@@ -49,12 +49,15 @@ def _script(redis, attr: str, source: str):
     return script
 
 
-async def acquire_chat_slot(user_id: int) -> bool:
-    """尝试占用一个生成槽位；Redis 故障时 fail-open。"""
+async def acquire_chat_slot(user_id: int) -> tuple[bool, bool]:
+    """尝试占用一个生成槽位，返回 (是否允许, 是否实际计数)。
+
+    Redis 故障时 fail-open，但第二个值为 False，调用方不得释放槽位。
+    """
     per_user = settings.CHAT_MAX_CONCURRENT_PER_USER
     total_limit = settings.CHAT_MAX_CONCURRENT_TOTAL
     if per_user <= 0 and total_limit <= 0:
-        return True
+        return True, False
     if per_user <= 0:
         per_user = 2**31 - 1
     if total_limit <= 0:
@@ -67,10 +70,11 @@ async def acquire_chat_slot(user_id: int) -> bool:
             keys=[USER_KEY.format(user_id=user_id), TOTAL_KEY],
             args=[per_user, total_limit, settings.CHAT_INFLIGHT_TTL_SECONDS],
         )
-        return bool(result)
+        allowed = bool(result)
+        return allowed, allowed
     except Exception:
         logger.warning("获取聊天并发槽失败，fail-open user_id=%s", user_id, exc_info=True)
-        return True
+        return True, False
 
 
 async def release_chat_slot(user_id: int) -> None:

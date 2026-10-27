@@ -6,9 +6,17 @@ from email.message import EmailMessage
 import aiosmtplib
 
 from app.core.config import settings
+from app.core.redis import get_redis
 from app.core.security import create_email_verification_token
 
 logger = logging.getLogger(__name__)
+
+
+async def _worker_available() -> bool:
+    try:
+        return bool(await get_redis().exists("worker:heartbeat"))
+    except Exception:
+        return False
 
 
 class MailService:
@@ -107,23 +115,29 @@ class MailService:
 
 
 async def dispatch_verification_email(user) -> None:
-    """生成验证令牌并优先投递到 ARQ 队列，失败回退内联发送。"""
+    """生成验证令牌并优先投递到 ARQ 队列；worker 不在线时回退内联发送。"""
     token = create_email_verification_token(user.id, user.email)
     try:
         from app.workers.queue import enqueue_verification_email
 
-        await enqueue_verification_email(user.email, token)
+        if await _worker_available():
+            await enqueue_verification_email(user.email, token)
+            return
+        logger.warning("ARQ worker 心跳缺失，验证邮件回退内联发送 to=%s", user.email)
     except Exception:
         logger.warning("投递验证邮件任务失败，回退内联发送 to=%s", user.email, exc_info=True)
-        await MailService().send_verification_email(user.email, token)
+    await MailService().send_verification_email(user.email, token)
 
 
 async def dispatch_password_reset_email(user, token: str) -> None:
-    """优先投递密码重置邮件到 ARQ 队列，失败回退内联发送。"""
+    """优先投递密码重置邮件到 ARQ 队列；worker 不在线时回退内联发送。"""
     try:
         from app.workers.queue import enqueue_password_reset_email
 
-        await enqueue_password_reset_email(user.email, token)
+        if await _worker_available():
+            await enqueue_password_reset_email(user.email, token)
+            return
+        logger.warning("ARQ worker 心跳缺失，密码重置邮件回退内联发送 to=%s", user.email)
     except Exception:
         logger.warning("投递密码重置邮件任务失败，回退内联发送 to=%s", user.email, exc_info=True)
-        await MailService().send_password_reset_email(user.email, token)
+    await MailService().send_password_reset_email(user.email, token)

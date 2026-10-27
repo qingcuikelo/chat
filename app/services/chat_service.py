@@ -506,6 +506,7 @@ class ChatService:
         conversation_id: int,
         user_id: int,
         user_message: str,
+        slot_counted: bool = False,
     ) -> None:
         """生产端：生成并写入 Redis Stream（由独立任务运行，不随连接取消）。"""
         stream = StreamService()
@@ -615,7 +616,8 @@ class ChatService:
             heartbeat_task.cancel()
             with suppress(asyncio.CancelledError):
                 await heartbeat_task
-            await release_chat_slot(user_id)
+            if slot_counted:
+                await release_chat_slot(user_id)
 
     # ---- 断点续传 ----
     async def iter_stream(

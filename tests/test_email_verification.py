@@ -2,6 +2,7 @@
 
 from app.core.config import settings
 from app.core.security import create_email_verification_token
+from app.models.user import User
 
 API = "/api/v1"
 
@@ -78,7 +79,8 @@ async def test_resend_verification_always_accepted(client):
     assert unknown.status_code == 202
 
 
-async def test_email_change_resets_verification(client, auth_headers):
+async def test_email_change_resets_verification(client, auth_headers, session_factory):
+    me = (await client.get(f"{API}/users/me", headers=auth_headers)).json()
     response = await client.patch(
         f"{API}/users/me",
         headers=auth_headers,
@@ -86,6 +88,11 @@ async def test_email_change_resets_verification(client, auth_headers):
     )
     assert response.status_code == 200
     assert response.json()["email_verified"] is False
+
+    async with session_factory() as session:
+        user = await session.get(User, me["id"])
+    assert user is not None
+    assert user.email_verified_at is None
 
     login = await client.post(
         f"{API}/auth/login", json={"username": "alice", "password": "Passw0rd!"}

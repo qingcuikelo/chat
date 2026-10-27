@@ -1,5 +1,9 @@
 """用户接口测试。"""
 
+from app.core.security import create_access_token
+from app.models.user import User
+from app.services.cache_service import CacheService
+
 API = "/api/v1"
 
 
@@ -109,6 +113,34 @@ async def test_change_password_requires_current_password_and_revokes_sessions(cl
         json={"username": "alice", "password": "NewPassw0rd!"},
     )
     assert new_login.status_code == 200
+
+
+async def test_old_access_rejected_despite_stale_user_cache(client, auth_headers, fake_redis):
+    me = (await client.get(f"{API}/users/me", headers=auth_headers)).json()
+    other_access = create_access_token(me["id"], 0)
+
+    changed = await client.patch(
+        f"{API}/users/me",
+        headers=auth_headers,
+        json={"password": "NewPassw0rd!", "current_password": "Passw0rd!"},
+    )
+    assert changed.status_code == 200
+
+    stale_user = User(
+        id=me["id"],
+        username="alice",
+        email="alice@example.com",
+        token_version=0,
+        email_verified=True,
+    )
+    await CacheService().set_user(stale_user)
+
+    response = await client.get(
+        f"{API}/users/me",
+        headers={"Authorization": f"Bearer {other_access}"},
+    )
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "UNAUTHORIZED"
 
 
 async def test_delete_me(client, auth_headers):

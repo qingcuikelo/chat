@@ -217,13 +217,28 @@ async def test_refresh_fails_closed_when_redis_is_unavailable(
     )
     refresh_token = login.json()["refresh_token"]
 
-    async def unavailable(*args, **kwargs):
+    def unavailable(*args, **kwargs):
         raise ConnectionError("redis unavailable")
 
-    monkeypatch.setattr(fake_redis, "getdel", unavailable)
-    monkeypatch.setattr(fake_redis, "get", unavailable)
+    monkeypatch.setattr(fake_redis, "register_script", unavailable)
 
     response = await client.post(f"{API}/auth/refresh", json={"refresh_token": refresh_token})
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "SERVICE_UNAVAILABLE"
+
+
+async def test_login_fails_when_refresh_token_cannot_be_stored(
+    client, auth_headers, fake_redis, monkeypatch
+):
+    def unavailable(*args, **kwargs):
+        raise ConnectionError("redis unavailable")
+
+    monkeypatch.setattr(fake_redis, "set", unavailable)
+
+    response = await client.post(
+        f"{API}/auth/login",
+        json={"username": "alice", "password": "Passw0rd!"},
+    )
     assert response.status_code == 503
     assert response.json()["detail"]["code"] == "SERVICE_UNAVAILABLE"
 
