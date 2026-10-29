@@ -39,6 +39,14 @@ async def update_me(
     )
 
 
+@router.delete("/me/email-change", status_code=status.HTTP_204_NO_CONTENT)
+async def cancel_email_change(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    await UserService(db).cancel_email_change(current_user)
+
+
 @router.get("/me/usage", response_model=UsageRangeRead)
 async def get_usage(
     from_date: date | None = Query(None, alias="from"),

@@ -43,6 +43,7 @@ class UserRead(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    pending_email: EmailStr | None = None
     email_verified: bool = False
     created_at: datetime
     updated_at: datetime

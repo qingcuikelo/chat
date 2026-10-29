@@ -1,6 +1,7 @@
 """认证业务逻辑。"""
 
 import jwt
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -157,9 +158,34 @@ class AuthService:
 
         if claims.get("type") != "email_verify":
             raise InvalidRequestError("验证链接无效")
+        purpose = claims.get("purpose", "verify_email")
+        if purpose not in ("verify_email", "email_change"):
+            raise InvalidRequestError("验证链接无效")
 
         user = await self.users.get(int(claims["sub"]))
-        if user is None or user.email != claims.get("email"):
+        if user is None:
+            raise InvalidRequestError("验证链接无效")
+
+        target_email = str(claims.get("email") or "")
+        if user.pending_email and target_email == user.pending_email:
+            existing = await self.users.get_by_email(target_email)
+            if existing is not None and existing.id != user.id:
+                raise ConflictError(code="EMAIL_TAKEN", message="邮箱已被占用")
+            user.email = target_email
+            user.pending_email = None
+            user.email_verified = True
+            user.email_verified_at = utcnow()
+            user.token_version = (user.token_version or 0) + 1
+            try:
+                await self.db.commit()
+            except IntegrityError as exc:
+                await self.db.rollback()
+                raise ConflictError(code="EMAIL_TAKEN", message="邮箱已被占用") from exc
+            await self.cache.invalidate_user(user.id)
+            await self.tokens.revoke_user_refresh_tokens(user.id)
+            return user
+
+        if target_email != user.email:
             raise InvalidRequestError("验证链接无效")
 
         if not user.email_verified:
@@ -172,9 +198,18 @@ class AuthService:
     async def resend_verification(self, email: str) -> None:
         """始终静默处理，避免账号枚举（是否发送由内部判断）。"""
         user = await self.users.get_by_email(email)
-        if user is None or user.email_verified:
+        if user is None:
+            user = await self.users.get_by_pending_email(email)
+
+        if user is None:
             return
-        await dispatch_verification_email(user)
+        if user.pending_email:
+            await dispatch_verification_email(
+                user, email=user.pending_email, purpose="email_change"
+            )
+            return
+        if not user.email_verified:
+            await dispatch_verification_email(user)
 
     async def refresh(self, refresh_token: str) -> TokenPair:
         claims = self._decode(refresh_token)

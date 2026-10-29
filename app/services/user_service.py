@@ -44,32 +44,35 @@ class UserService:
         if payload.username and payload.username != user.username:
             if await self.users.get_by_username(payload.username):
                 raise ConflictError(code="USERNAME_TAKEN", message="用户名已被占用")
-        if payload.email and payload.email != user.email:
-            if await self.users.get_by_email(payload.email):
+        email_changed = payload.email is not None and payload.email != user.email
+        if email_changed and payload.email is not None:
+            if await self.users.get_by_email(str(payload.email)):
                 raise ConflictError(code="EMAIL_TAKEN", message="邮箱已被占用")
 
-        email_changed = payload.email is not None and payload.email != user.email
         password_changed = payload.password is not None
-        sensitive_change = password_changed or email_changed
-        if sensitive_change:
+        requires_current = password_changed or email_changed
+        if requires_current:
             if not verify_password(payload.current_password or "", user.password_hash):
                 raise InvalidRequestError("修改密码或邮箱需要提供正确的当前密码")
 
         fields: dict = {}
         if payload.username is not None:
             fields["username"] = payload.username
-        if payload.email is not None:
-            fields["email"] = payload.email
         if password_changed:
             fields["password_hash"] = hash_password(payload.password or "")
-        if sensitive_change:
             fields["token_version"] = (user.token_version or 0) + 1
-        if email_changed and settings.EMAIL_VERIFICATION_REQUIRED:
-            # 邮箱变更后重新进入验证流程
-            fields["email_verified"] = False
-            fields["email_verified_at"] = None
+        if email_changed:
+            if settings.EMAIL_VERIFICATION_REQUIRED:
+                fields["pending_email"] = str(payload.email)
+            else:
+                fields["email"] = str(payload.email)
+                fields["pending_email"] = None
+                fields["token_version"] = (user.token_version or 0) + 1
 
-        if sensitive_change:
+        revoke_sessions = password_changed or (
+            email_changed and not settings.EMAIL_VERIFICATION_REQUIRED
+        )
+        if revoke_sessions:
             try:
                 await self.tokens.revoke_user_refresh_tokens(user.id, raise_on_failure=True)
                 if access_jti:
@@ -84,8 +87,20 @@ class UserService:
         await self.cache.invalidate_user(user.id)
 
         if email_changed and settings.EMAIL_VERIFICATION_REQUIRED:
-            await dispatch_verification_email(user)
+            await dispatch_verification_email(
+                user, email=str(payload.email), purpose="email_change"
+            )
         return user
+
+    async def cancel_email_change(self, current_user: User) -> None:
+        user = await self.users.get(current_user.id)
+        if user is None:
+            raise UserNotFoundError()
+        if not user.pending_email:
+            return
+        user.pending_email = None
+        await self.db.commit()
+        await self.cache.invalidate_user(user.id)
 
     async def delete_me(self, current_user: User) -> None:
         user = await self.users.get(current_user.id)

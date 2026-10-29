@@ -31,15 +31,18 @@ class MailService:
     def password_reset_link(token: str) -> str:
         return f"{settings.APP_BASE_URL.rstrip('/')}/reset-password?token={token}"
 
-    def build_verification_email(self, to_email: str, token: str) -> EmailMessage:
+    def build_verification_email(
+        self, to_email: str, token: str, purpose: str = "verify_email"
+    ) -> EmailMessage:
         link = self.verification_link(token)
+        changing_email = purpose == "email_change"
         message = EmailMessage()
         message["From"] = settings.MAIL_FROM
         message["To"] = to_email
-        message["Subject"] = "请验证你的邮箱"
+        message["Subject"] = "验证你的新邮箱" if changing_email else "请验证你的邮箱"
         message.set_content(
             "你好，\n\n"
-            f"请点击下面的链接完成邮箱验证（有效期 "
+            f"请点击下面的链接完成{'新邮箱' if changing_email else '邮箱'}验证（有效期 "
             f"{settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_MINUTES} 分钟）：\n"
             f"{link}\n\n"
             "如果这不是你本人的操作，请忽略本邮件。"
@@ -87,7 +90,9 @@ class MailService:
             logger.warning("密码重置邮件发送失败 to=%s", to_email, exc_info=True)
             return False
 
-    async def send_verification_email(self, to_email: str, token: str) -> bool:
+    async def send_verification_email(
+        self, to_email: str, token: str, purpose: str = "verify_email"
+    ) -> bool:
         if not settings.SMTP_HOST:
             if settings.APP_ENV.lower() != "production":
                 logger.warning(
@@ -97,7 +102,7 @@ class MailService:
             else:
                 logger.warning("未配置 SMTP，跳过验证邮件发送 to=%s", to_email)
             return False
-        message = self.build_verification_email(to_email, token)
+        message = self.build_verification_email(to_email, token, purpose)
         try:
             await aiosmtplib.send(
                 message,
@@ -114,19 +119,22 @@ class MailService:
             return False
 
 
-async def dispatch_verification_email(user) -> None:
+async def dispatch_verification_email(
+    user, *, email: str | None = None, purpose: str = "verify_email"
+) -> None:
     """生成验证令牌并优先投递到 ARQ 队列；worker 不在线时回退内联发送。"""
-    token = create_email_verification_token(user.id, user.email)
+    target_email = email or user.email
+    token = create_email_verification_token(user.id, target_email, purpose)
     try:
         from app.workers.queue import enqueue_verification_email
 
         if await _worker_available():
-            await enqueue_verification_email(user.email, token)
+            await enqueue_verification_email(target_email, token, purpose)
             return
-        logger.warning("ARQ worker 心跳缺失，验证邮件回退内联发送 to=%s", user.email)
+        logger.warning("ARQ worker 心跳缺失，验证邮件回退内联发送 to=%s", target_email)
     except Exception:
-        logger.warning("投递验证邮件任务失败，回退内联发送 to=%s", user.email, exc_info=True)
-    await MailService().send_verification_email(user.email, token)
+        logger.warning("投递验证邮件任务失败，回退内联发送 to=%s", target_email, exc_info=True)
+    await MailService().send_verification_email(target_email, token, purpose)
 
 
 async def dispatch_password_reset_email(user, token: str) -> None:

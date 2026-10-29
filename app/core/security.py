@@ -93,11 +93,14 @@ def create_password_reset_token(user_id: int | str) -> str:
     )
 
 
-def create_email_verification_token(user_id: int | str, email: str) -> str:
+def create_email_verification_token(
+    user_id: int | str, email: str, purpose: str = "verify_email"
+) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": str(user_id),
         "type": "email_verify",
+        "purpose": purpose,
         "email": email,
         "jti": uuid.uuid4().hex,
         "iat": now,

@@ -61,11 +61,12 @@
 | POST | `/api/v1/auth/logout` | 是 | 撤销当前 Access Token，可同时撤销 Refresh Token；204 |
 | POST | `/api/v1/auth/password/forgot` | 否 | 发送重置邮件；202，账号不存在也返回相同结果 |
 | POST | `/api/v1/auth/password/reset` | 否 | 一次性重置密码并撤销全部旧会话；无效/过期返回 `PASSWORD_RESET_INVALID` |
-| POST | `/api/v1/auth/verify-email` | 否 | 验证邮箱 token |
+| POST | `/api/v1/auth/verify-email` | 否 | 验证当前邮箱或 pending 邮箱的 token |
 | GET | `/api/v1/auth/verify-email?token=...` | 否 | 邮件链接落地页，返回 HTML |
-| POST | `/api/v1/auth/resend-verification` | 否 | 重发验证邮件；202，账号不存在/已验证也返回相同结果 |
+| POST | `/api/v1/auth/resend-verification` | 否 | 重发当前或 pending 邮箱验证邮件；202，账号不存在/已验证也返回相同结果 |
 | GET | `/api/v1/users/me` | 是 | 当前用户资料 |
-| PATCH | `/api/v1/users/me` | 是 | 修改用户名/邮箱/密码；改密或改邮箱需 `current_password` 并撤销旧会话 |
+| PATCH | `/api/v1/users/me` | 是 | 修改用户名/密码；请求改邮箱会进入 pending 验证 |
+| DELETE | `/api/v1/users/me/email-change` | 是 | 取消待验证的新邮箱；204 |
 | DELETE | `/api/v1/users/me` | 是 | 删除账号及会话/消息；204 |
 | GET | `/api/v1/users/me/usage` | 是 | 按日 token 用量（默认最近 7 天，范围 ≤366 天） |
 | GET | `/api/v1/users/me/quota` | 是 | 当日配额、已用、剩余与是否强制 |
@@ -139,6 +140,18 @@
 
 - Markdown 输出会话元信息与按角色分节的消息正文；不做 HTML 渲染。
 - 注意：`conversation.is_archived` 是用户可见的会话归档；`messages_archive` 是冷热消息存储迁移，两者独立。
+
+### 2.4 邮箱变更（pending email）
+
+`PATCH /api/v1/users/me` 携带新 `email` 与 `current_password` 时：
+
+- 当前 `email` 保持不变并继续有效；新地址写入 `pending_email`。
+- `GET /users/me` 返回 `pending_email`，前端可展示待验证状态。
+- 验证邮件中的 token 携带 `purpose=email_change`；调用 `POST /auth/verify-email` 验证成功后，才把 `email` 切换为新地址并清空 `pending_email`。
+- 切换成功会递增 `token_version` 并使旧 access/refresh 全部失效，需要用新邮箱重新登录。
+- `DELETE /users/me/email-change` 取消 pending 状态，旧验证链接随目标不匹配而失效。
+- `POST /auth/resend-verification` 在存在 pending email 时优先重发 pending 地址。
+- 若新邮箱已被其他账号占用，请求返回 `409 EMAIL_TAKEN`；验证时发生竞争冲突也会拒绝切换。
 
 ## 3. SSE 契约
 

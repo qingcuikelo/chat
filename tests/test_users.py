@@ -40,7 +40,27 @@ async def test_update_me(client, auth_headers):
     assert response.status_code == 200
     body = response.json()
     assert body["username"] == "alice_new"
-    assert body["email"] == "new@example.com"
+    assert body["email"] == "alice@example.com"
+    assert body["pending_email"] == "new@example.com"
+    assert body["email_verified"] is True
+
+    login = await client.post(
+        f"{API}/auth/login",
+        json={"username": "alice_new", "password": "Passw0rd!"},
+    )
+    assert login.status_code == 200
+
+
+async def test_email_change_rejects_another_users_email(client, auth_headers, create_user_token):
+    await create_user_token("bob", "bob@example.com")
+
+    response = await client.patch(
+        f"{API}/users/me",
+        headers=auth_headers,
+        json={"email": "bob@example.com", "current_password": "Passw0rd!"},
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "EMAIL_TAKEN"
 
 
 async def test_email_change_requires_current_password(client, auth_headers):

@@ -29,7 +29,7 @@ def test_sqlite_migrations_fresh_upgrade(tmp_path):
             row[0]
             for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
-    assert version == ("c1e2f3a4b5d6",)
+    assert version == ("e3a4b5c6d7f8",)
     assert {"users", "conversation", "messages", "messages_archive", "usage_daily"} <= tables
 
 

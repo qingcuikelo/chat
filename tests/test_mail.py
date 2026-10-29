@@ -46,9 +46,10 @@ async def test_development_logs_verification_link_without_smtp(monkeypatch, capl
 async def test_dispatch_uses_queue_when_worker_heartbeat_present(fake_redis, monkeypatch):
     captured: dict[str, str] = {}
 
-    async def fake_enqueue(to_email: str, token: str) -> None:
+    async def fake_enqueue(to_email: str, token: str, purpose: str) -> None:
         captured["email"] = to_email
         captured["token"] = token
+        captured["purpose"] = purpose
 
     monkeypatch.setattr(queue_module, "enqueue_verification_email", fake_enqueue)
     await fake_redis.set("worker:heartbeat", "1")
@@ -58,3 +59,4 @@ async def test_dispatch_uses_queue_when_worker_heartbeat_present(fake_redis, mon
 
     assert captured["email"] == "a@example.com"
     assert captured["token"]
+    assert captured["purpose"] == "verify_email"
